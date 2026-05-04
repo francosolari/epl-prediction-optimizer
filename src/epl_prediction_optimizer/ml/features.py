@@ -47,16 +47,11 @@ FEATURE_COLUMNS = [
     "h2h_home_win_rate",
     "h2h_draw_rate",
     "h2h_meetings",
-    # Shots on target rolling avg (5-game) — xG proxy, available from 2000-01
-    "home_shots_ot_form",
-    "away_shots_ot_form",
-    # Rolling xG differential (5-game) — available from 2014-15 only, NaN otherwise
-    "home_xg_form",
-    "away_xg_form",
-    # Betting market implied probabilities (opening B365 odds, normalised)
-    "market_prob_home",
-    "market_prob_draw",
-    "market_prob_away",
+    # --- Candidates for future inclusion (validated via ablation_test.py) ---
+    # "home_shots_ot_form", "away_shots_ot_form",   # +shots: 160 combined (vs 163 baseline)
+    # "home_xg_form", "away_xg_form",               # +xG: 156 combined
+    # "market_prob_home", "market_prob_draw", "market_prob_away",  # +odds: 154 combined
+    # Enable only when 3+ completed backtest seasons confirm improvement
 ]
 
 

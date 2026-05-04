@@ -98,6 +98,9 @@
         <div class="season-switcher">
           <a href="/backtest?season=2425" {% if season == "2425" %}class="active"{% endif %}>2024–25</a>
           <a href="/backtest?season=2324" {% if season == "2324" %}class="active"{% endif %}>2023–24</a>
+          <a href="/backtest?season=2223" {% if season == "2223" %}class="active"{% endif %}>2022–23</a>
+          <a href="/backtest?season=2122" {% if season == "2122" %}class="active"{% endif %}>2021–22</a>
+          <a href="/backtest?season=2021" {% if season == "2021" %}class="active"{% endif %}>2020–21</a>
         </div>
         <form class="action-matrix" method="post" action="/api/backtest-season/{{ season }}">
           <button>Run backtest for this season</button>

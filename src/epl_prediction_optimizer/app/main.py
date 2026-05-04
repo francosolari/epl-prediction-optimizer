@@ -79,9 +79,10 @@ def create_app(
         metrics = _json.loads(metrics_path.read_text()) if metrics_path.exists() else None
         from epl_prediction_optimizer.pipeline import WINNER_BENCHMARKS
         from epl_prediction_optimizer.ml.analysis import backtest_summary_report
+        _all_backtest_seasons = ["2021", "2122", "2223", "2324", "2425"]
         summary = backtest_summary_report(
             runtime_dir / "data" / "artifacts",
-            list(WINNER_BENCHMARKS.keys()),
+            _all_backtest_seasons,
         )
         experiments = db.list_experiment_runs()
         return templates.TemplateResponse(

@@ -29,7 +29,7 @@ from epl_prediction_optimizer.ml.analysis import (
 from epl_prediction_optimizer.paths import ARTIFACT_DIR, EXPORT_DIR
 
 
-DEFAULT_SEASONS = ["2324", "2425", "2526"]
+DEFAULT_SEASONS = ["2021", "2122", "2223", "2324", "2425"]
 
 
 def main() -> None:

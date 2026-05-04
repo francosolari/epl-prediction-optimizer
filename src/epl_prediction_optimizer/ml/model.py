@@ -53,11 +53,13 @@ class ModelRun:
 def train_model(
     training_frame: pd.DataFrame,
     sample_weight: pd.Series | None = None,
+    feature_columns: list[str] | None = None,
 ) -> ModelRun:
     """Train a calibrated gradient boosting model from engineered features."""
     if training_frame["outcome"].nunique() < 3:
         raise ValueError("Training data must include home wins, draws, and away wins.")
-    x = training_frame[FEATURE_COLUMNS]
+    cols = feature_columns if feature_columns is not None else FEATURE_COLUMNS
+    x = training_frame[cols]
     y = training_frame["outcome"]
     sw = sample_weight.values if sample_weight is not None else None
     base = HistGradientBoostingClassifier(

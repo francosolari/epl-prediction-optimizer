@@ -11,12 +11,14 @@ from sklearn.metrics import accuracy_score, log_loss
 
 from epl_prediction_optimizer.data.sources import (
     DEFAULT_SEASON_CODES,
+    OPENFOOTBALL_SEASON_CODES,
     UNDERSTAT_SEASON_CODES,
     apply_official_gameweeks,
     attach_historical_elo,
     attach_understat_xg,
     download_historical_results,
     fetch_clubelo_history,
+    fetch_openfootball_gameweeks,
     fetch_understat_xg,
     fetch_upcoming_fixtures,
     get_cached_pl_matches,
@@ -161,11 +163,16 @@ def rebuild_processed_history() -> dict[str, int]:
             continue
         try:
             frame = read_historical_results(csv_path, season_code)
-            # Use only locally cached gameweek data — no API calls
+            # Prefer football-data.org official cache; fall back to openfootball
             official_cache = RAW_DIR / "football-data-org" / f"{season_code.zfill(4)}_PL_matches.csv"
+            openfootball_cache = RAW_DIR / "openfootball" / f"{season_code}_PL_matchdays.csv"
             if official_cache.exists():
                 import pandas as _pd
                 official = _pd.read_csv(official_cache)
+                frame = apply_official_gameweeks(frame, official)
+            elif openfootball_cache.exists():
+                import pandas as _pd
+                official = _pd.read_csv(openfootball_cache)
                 frame = apply_official_gameweeks(frame, official)
             frames.append(frame)
         except Exception:
@@ -253,6 +260,8 @@ def refresh_current_season(target_season: str = "2526", force: bool = True) -> d
 WINNER_BENCHMARKS: dict[str, int] = {
     "2425": 86,
     "2324": 83,
+    "2223": 78,
+    # Older seasons — add when contest winner data is confirmed
 }
 
 
@@ -296,7 +305,9 @@ def backtest_season(
     predictions[["p_home_win", "p_draw", "p_away_win"]] = predictions[
         ["p_home_win", "p_draw", "p_away_win"]
     ].div(totals, axis=0)
-    predictions = apply_dixon_coles_correction(predictions)
+    # DC correction improves draw calibration but can hurt Stage B pick selection.
+    # Disabled in backtest until we validate it improves combined season points.
+    # predictions = apply_dixon_coles_correction(predictions)
 
     actual = target_matches[
         ["match_id", "home_team", "away_team", "home_goals", "away_goals"]
