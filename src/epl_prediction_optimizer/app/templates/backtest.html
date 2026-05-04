@@ -1,0 +1,263 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Backtest · EPL Prediction Optimizer</title>
+    <link rel="stylesheet" href="/static/styles.css">
+    <style>
+      .backtest-chart {
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        background: var(--surface);
+        padding: var(--space-lg);
+        display: grid;
+        gap: var(--space-md);
+      }
+      .chart-wrap svg {
+        width: 100%;
+        height: auto;
+        display: block;
+      }
+      .chart-legend {
+        display: flex;
+        gap: var(--space-lg);
+        flex-wrap: wrap;
+      }
+      .legend-item {
+        display: flex;
+        align-items: center;
+        gap: var(--space-xs);
+        font-size: 0.8rem;
+        color: var(--muted);
+      }
+      .legend-swatch {
+        width: 24px;
+        height: 3px;
+        border-radius: 2px;
+      }
+      .swatch-model { background: var(--pitch); }
+      .swatch-winner { background: var(--gold); }
+      .pts-win  { color: var(--pitch-deep); font-weight: 780; }
+      .pts-draw { color: var(--muted); }
+      .pts-loss { color: var(--red); }
+      .season-switcher {
+        display: flex;
+        gap: var(--space-xs);
+        flex-wrap: wrap;
+      }
+      .season-switcher a {
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        background: var(--surface);
+        color: var(--ink);
+        text-decoration: none;
+        padding: 9px 12px;
+        font-weight: 750;
+      }
+      .season-switcher a.active {
+        background: var(--pitch-deep);
+        border-color: var(--pitch-deep);
+        color: var(--white);
+      }
+      .gap-positive { color: var(--red); }
+      .gap-zero     { color: var(--pitch); }
+    </style>
+  </head>
+  <body>
+    <header class="shell-header">
+      <nav class="nav-rail" aria-label="Primary">
+        <a href="/">Dashboard</a>
+        <a href="/challenge?season=2526">My Picks</a>
+        <a class="active" href="/backtest">Backtest</a>
+        <a href="/model">Model</a>
+        <a href="/data">Data</a>
+      </nav>
+      <div class="title-block">
+        <p class="eyebrow">Historical model evaluation</p>
+        <h1>Backtest Results</h1>
+      </div>
+      <div class="system-state">
+        {% if metrics %}
+          <span>{{ metrics.target_season }}</span>
+          <strong>{{ metrics.optimized_points }} pts</strong>
+        {% else %}
+          <span>no data</span>
+          <strong>—</strong>
+        {% endif %}
+      </div>
+    </header>
+
+    <main class="workspace">
+
+      <section class="command-strip">
+        <div class="section-heading">
+          <h2>Season</h2>
+          <p>Run a backtest to train on prior seasons and simulate picks for the target year.</p>
+        </div>
+        <div class="season-switcher">
+          <a href="/backtest?season=2425" {% if season == "2425" %}class="active"{% endif %}>2024–25</a>
+          <a href="/backtest?season=2324" {% if season == "2324" %}class="active"{% endif %}>2023–24</a>
+        </div>
+        <form class="action-matrix" method="post" action="/api/backtest-season/{{ season }}">
+          <button>Run backtest for this season</button>
+        </form>
+      </section>
+
+      {% if metrics %}
+        <section class="summary-grid" aria-label="Backtest summary">
+          <div class="metric-tile">
+            <span>Model points</span>
+            <strong>{{ metrics.optimized_points }}</strong>
+          </div>
+          <div class="metric-tile">
+            <span>Winner baseline</span>
+            <strong>{{ metrics.winner_points if metrics.winner_points else "—" }}</strong>
+          </div>
+          <div class="metric-tile">
+            <span>Gap to winner</span>
+            {% if metrics.winner_points %}
+              {% set gap = metrics.winner_points - metrics.optimized_points %}
+              <strong class="{% if gap > 0 %}gap-positive{% else %}gap-zero{% endif %}">
+                {% if gap > 0 %}−{{ gap }}{% else %}+{{ gap | abs }}{% endif %}
+              </strong>
+            {% else %}
+              <strong>—</strong>
+            {% endif %}
+          </div>
+          <div class="metric-tile">
+            <span>Picks made</span>
+            <strong>{{ metrics.optimized_picks }}</strong>
+          </div>
+          <div class="metric-tile">
+            <span>Accuracy</span>
+            <strong>{{ "%.1f"|format(metrics.accuracy * 100) }}%</strong>
+          </div>
+          <div class="metric-tile">
+            <span>Log loss</span>
+            <strong>{{ "%.3f"|format(metrics.log_loss) }}</strong>
+          </div>
+          <div class="metric-tile">
+            <span>Expected points</span>
+            <strong>{{ "%.1f"|format(metrics.optimized_expected_points) }}</strong>
+          </div>
+          <div class="metric-tile">
+            <span>Training matches</span>
+            <strong>{{ metrics.training_matches }}</strong>
+          </div>
+        </section>
+
+        {% if chart %}
+          <section class="backtest-chart">
+            <div class="section-heading">
+              <h2>Cumulative Points</h2>
+              <p>Week-by-week running total vs the season winner's final score.</p>
+            </div>
+            <div class="chart-wrap">
+              <svg viewBox="0 0 {{ chart.width }} {{ chart.height + 30 }}" xmlns="http://www.w3.org/2000/svg">
+                <!-- grid lines -->
+                {% for tick in chart.y_ticks %}
+                  <line
+                    x1="0" y1="{{ tick.y }}"
+                    x2="{{ chart.width }}" y2="{{ tick.y }}"
+                    stroke="oklch(0.84 0.024 108)" stroke-width="1"/>
+                  <text x="4" y="{{ tick.y - 3 }}" font-size="9" fill="oklch(0.48 0.03 116)">{{ tick.label }}</text>
+                {% endfor %}
+                <!-- winner baseline -->
+                {% if chart.winner_y is not none %}
+                  <line
+                    x1="0" y1="{{ chart.winner_y }}"
+                    x2="{{ chart.width }}" y2="{{ chart.winner_y }}"
+                    stroke="oklch(0.72 0.14 82)" stroke-width="1.5" stroke-dasharray="5,4"/>
+                  <text x="{{ chart.width - 4 }}" y="{{ chart.winner_y - 4 }}" font-size="9" fill="oklch(0.72 0.14 82)" text-anchor="end">Winner {{ metrics.winner_points }}pts</text>
+                {% endif %}
+                <!-- model line -->
+                <polyline
+                  points="{{ chart.model_points }}"
+                  fill="none"
+                  stroke="oklch(0.43 0.105 143)"
+                  stroke-width="2.5"
+                  stroke-linejoin="round"
+                  stroke-linecap="round"/>
+                <!-- dots -->
+                {% for dot in chart.dots %}
+                  <circle cx="{{ dot.x }}" cy="{{ dot.y }}" r="3" fill="oklch(0.43 0.105 143)"/>
+                {% endfor %}
+                <!-- x-axis week labels -->
+                {% for dot in chart.dots %}
+                  {% if loop.index % 5 == 0 or loop.first or loop.last %}
+                    <text x="{{ dot.x }}" y="{{ chart.height + 22 }}" font-size="9" fill="oklch(0.48 0.03 116)" text-anchor="middle">W{{ dot.week }}</text>
+                  {% endif %}
+                {% endfor %}
+              </svg>
+            </div>
+            <div class="chart-legend">
+              <div class="legend-item">
+                <div class="legend-swatch swatch-model"></div>
+                <span>Model cumulative points</span>
+              </div>
+              {% if metrics.winner_points %}
+                <div class="legend-item">
+                  <div class="legend-swatch swatch-winner"></div>
+                  <span>Season winner final score</span>
+                </div>
+              {% endif %}
+            </div>
+          </section>
+        {% endif %}
+
+        <section class="table-section">
+          <div class="section-heading">
+            <h2>Pick-by-Pick Detail</h2>
+            <p>Every optimized pick for the season, scored against actual results.</p>
+          </div>
+          <div class="data-table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Wk</th>
+                  <th>Pick</th>
+                  <th>Opponent</th>
+                  <th>Venue</th>
+                  <th>Result</th>
+                  <th>xPts</th>
+                  <th>Pts</th>
+                  <th>Running</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for pick in picks %}
+                  <tr>
+                    <td>{{ pick.contest_week }}</td>
+                    <td><strong>{{ pick.team }}</strong></td>
+                    <td>{{ pick.opponent }}</td>
+                    <td>{{ pick.venue }}</td>
+                    <td>
+                      {% if pick.home_goals is not none and pick.away_goals is not none %}
+                        {{ pick.home_team_label }} {{ pick.home_goals }}–{{ pick.away_goals }} {{ pick.away_team_label }}
+                      {% else %}—{% endif %}
+                    </td>
+                    <td>{{ "%.2f"|format(pick.expected_points) }}</td>
+                    <td class="{% if pick.actual_points == 3 %}pts-win{% elif pick.actual_points == 1 %}pts-draw{% else %}pts-loss{% endif %}">
+                      <strong>{{ pick.actual_points }}</strong>
+                    </td>
+                    <td>{{ pick.cumulative }}</td>
+                  </tr>
+                {% else %}
+                  <tr><td colspan="8">No picks found — run the backtest first.</td></tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+      {% else %}
+        <div class="empty-state">
+          <strong>No backtest data for {{ season }}.</strong>
+          <span>Click "Run backtest" above to generate results.</span>
+        </div>
+      {% endif %}
+
+    </main>
+  </body>
+</html>

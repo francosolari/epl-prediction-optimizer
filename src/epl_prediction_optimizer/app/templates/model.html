@@ -1,0 +1,245 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Model · EPL Prediction Optimizer</title>
+    <link rel="stylesheet" href="/static/styles.css">
+    <style>
+      .stage-diagram {
+        display: grid;
+        grid-template-columns: 1fr auto 1fr;
+        gap: var(--space-md);
+        align-items: center;
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        background: var(--surface);
+        padding: var(--space-lg);
+      }
+      .stage-box {
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        padding: var(--space-md);
+        background: var(--bg);
+      }
+      .stage-box h3 { margin: 0 0 var(--space-xs); font-size: 0.88rem; color: var(--pitch-deep); }
+      .stage-box p { font-size: 0.8rem; color: var(--muted); margin: 0; }
+      .stage-arrow {
+        color: var(--muted);
+        font-size: 1.5rem;
+        text-align: center;
+      }
+      .cmd-block {
+        background: var(--ink);
+        color: var(--white);
+        border-radius: var(--radius);
+        padding: var(--space-sm) var(--space-md);
+        font-family: "SF Mono", "Fira Code", "Cascadia Code", monospace;
+        font-size: 0.82rem;
+        overflow-x: auto;
+      }
+      .cmd-block code { color: color-mix(in oklch, var(--gold), white 20%); }
+    </style>
+  </head>
+  <body>
+    <header class="shell-header">
+      <nav class="nav-rail" aria-label="Primary">
+        <a href="/">Dashboard</a>
+        <a href="/challenge?season=2526">My Picks</a>
+        <a href="/backtest">Backtest</a>
+        <a class="active" href="/model">Model</a>
+        <a href="/data">Data</a>
+      </nav>
+      <div class="title-block">
+        <p class="eyebrow">Two-stage architecture</p>
+        <h1>Model &amp; Optimizer</h1>
+      </div>
+      <div class="system-state">
+        {% if metrics %}
+          <span>accuracy</span>
+          <strong>{{ "%.1f"|format(metrics.accuracy * 100) }}%</strong>
+        {% else %}
+          <span>no model</span>
+          <strong>—</strong>
+        {% endif %}
+      </div>
+    </header>
+
+    <main class="workspace">
+
+      <section class="this-week" style="padding:var(--space-lg)">
+        <div class="section-heading">
+          <h2>Two-Stage Architecture</h2>
+          <p>Stage A and Stage B are deliberately separate — improving one does not require changing the other.</p>
+        </div>
+        <div class="stage-diagram">
+          <div class="stage-box">
+            <h3>Stage A · Probability Model</h3>
+            <p>HistGradientBoosting trained on 30 seasons. Outputs P(home win), P(draw), P(away win) for every fixture.
+            Optimized for log-loss calibration, not contest constraints.</p>
+            <p style="margin-top:8px">Features: Elo diff, rolling form, home/away form, win streak, in-season table position.</p>
+          </div>
+          <div class="stage-arrow">→</div>
+          <div class="stage-box">
+            <h3>Stage B · Pick Optimizer</h3>
+            <p>Integer programming (PuLP). Takes Stage A probabilities as input.
+            Applies contest constraints: one pick per week, each team 1–2 uses, each venue at most once.</p>
+            <p style="margin-top:8px">Maximizes expected total season points subject to constraints.</p>
+          </div>
+        </div>
+      </section>
+
+      {% if metrics %}
+        <section class="summary-grid">
+          <div class="metric-tile">
+            <span>Training accuracy</span>
+            <strong>{{ "%.1f"|format(metrics.accuracy * 100) }}%</strong>
+          </div>
+          <div class="metric-tile">
+            <span>Log loss</span>
+            <strong>{{ "%.4f"|format(metrics.log_loss) }}</strong>
+          </div>
+          <div class="metric-tile">
+            <span>Training matches</span>
+            <strong>{{ "{:,}".format(metrics.rows | int) }}</strong>
+          </div>
+          <div class="metric-tile">
+            <span>Trained at</span>
+            <strong style="font-size:0.9rem">{{ metrics.trained_at[:10] if metrics.trained_at else "—" }}</strong>
+          </div>
+        </section>
+      {% else %}
+        <div class="empty-state">
+          <strong>No trained model found.</strong>
+          <span>Run the pipeline from the Dashboard to train.</span>
+        </div>
+      {% endif %}
+
+      {% if backtest_summary %}
+        <section class="table-section">
+          <div class="section-heading">
+            <h2>Stage A+B Backtest Summary</h2>
+            <p>Model trained on all prior seasons, tested on the target season. Winner benchmarks shown for reference.</p>
+          </div>
+          <div class="data-table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Season</th>
+                  <th>Accuracy</th>
+                  <th>Log Loss</th>
+                  <th>Picks</th>
+                  <th>Model Pts</th>
+                  <th>Expected Pts</th>
+                  <th>Winner</th>
+                  <th>Gap</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for row in backtest_summary %}
+                  <tr>
+                    <td><strong>{{ row.season }}</strong></td>
+                    <td>{{ "%.1f"|format(row.accuracy * 100) if row.accuracy else "—" }}%</td>
+                    <td>{{ "%.4f"|format(row.log_loss) if row.log_loss else "—" }}</td>
+                    <td>{{ row.picks | int if row.picks else "—" }}</td>
+                    <td><strong>{{ row.model_points | int if row.model_points is not none else "—" }}</strong></td>
+                    <td>{{ "%.1f"|format(row.expected_points) if row.expected_points else "—" }}</td>
+                    <td>{{ row.winner_points | int if row.winner_points else "—" }}</td>
+                    <td>
+                      {% if row.gap_to_winner is not none %}
+                        <strong style="color:{% if row.gap_to_winner > 0 %}var(--red){% else %}var(--pitch){% endif %}">
+                          {% if row.gap_to_winner > 0 %}−{{ row.gap_to_winner | int }}{% else %}+{{ (row.gap_to_winner * -1) | int }}{% endif %}
+                        </strong>
+                      {% else %}—{% endif %}
+                    </td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      {% endif %}
+
+      {% if experiments %}
+        <section class="table-section">
+          <div class="section-heading">
+            <h2>Experiment History</h2>
+            <p>Every backtest run is recorded with the model hyperparameters and feature set used at the time.</p>
+          </div>
+          <div class="data-table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>Run at</th>
+                  <th>Season</th>
+                  <th>Pts</th>
+                  <th>Winner</th>
+                  <th>Gap</th>
+                  <th>Accuracy</th>
+                  <th>Log Loss</th>
+                  <th>Features</th>
+                  <th>max_iter</th>
+                  <th>lr</th>
+                  <th>depth</th>
+                  <th>min_leaf</th>
+                  <th>l2_reg</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for exp in experiments %}
+                  <tr>
+                    <td>{{ exp.id }}</td>
+                    <td style="font-size:0.78rem;color:var(--muted)">{{ exp.run_at[:16] }}</td>
+                    <td><strong>{{ exp.season }}</strong></td>
+                    <td><strong>{{ exp.optimized_points if exp.optimized_points is not none else "—" }}</strong></td>
+                    <td>{{ exp.winner_points if exp.winner_points is not none else "—" }}</td>
+                    <td>
+                      {% if exp.gap_to_winner is not none %}
+                        <strong style="color:{% if exp.gap_to_winner > 0 %}var(--red){% else %}var(--pitch){% endif %}">
+                          {% if exp.gap_to_winner > 0 %}−{{ exp.gap_to_winner }}{% else %}+{{ (exp.gap_to_winner * -1) | int }}{% endif %}
+                        </strong>
+                      {% else %}—{% endif %}
+                    </td>
+                    <td>{{ "%.1f"|format(exp.accuracy * 100) if exp.accuracy else "—" }}%</td>
+                    <td>{{ "%.4f"|format(exp.log_loss) if exp.log_loss else "—" }}</td>
+                    <td>{{ exp.feature_columns | length }}</td>
+                    <td>{{ exp.model_params.get("max_iter", "—") }}</td>
+                    <td>{{ exp.model_params.get("learning_rate", "—") }}</td>
+                    <td>{{ exp.model_params.get("max_depth", "—") }}</td>
+                    <td>{{ exp.model_params.get("min_samples_leaf", "—") }}</td>
+                    <td>{{ exp.model_params.get("l2_regularization", "—") }}</td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      {% endif %}
+
+      <section class="operation-panel">
+        <div class="section-heading">
+          <h2>Reusable Analysis Scripts</h2>
+          <p>Run these from the repo root — they're permanent, not one-off commands.</p>
+        </div>
+        <div class="cmd-block">
+          <code># Feature importance + training metrics + backtest comparison</code><br>
+          uv run scripts/analyze_model.py<br>
+          uv run scripts/analyze_model.py --season 2425<br>
+          uv run scripts/analyze_model.py --no-importance<br>
+          <br>
+          <code># Run and compare backtests</code><br>
+          uv run scripts/compare_backtests.py<br>
+          uv run scripts/compare_backtests.py --run 2324 2425<br>
+          uv run scripts/compare_backtests.py --picks 2425<br>
+          <br>
+          <code># CLI equivalents</code><br>
+          eplpo analyze --season 2425<br>
+          eplpo backtest --season 2324<br>
+          eplpo train &amp;&amp; eplpo predict &amp;&amp; eplpo optimize
+        </div>
+      </section>
+
+    </main>
+  </body>
+</html>

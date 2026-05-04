@@ -1,0 +1,994 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>EPL Prediction Optimizer — Project Plan & Progress Tracker</title>
+  <style>
+    :root {
+      --bg: #f6f8fb;
+      --card: #ffffff;
+      --ink: #18202f;
+      --muted: #69758a;
+      --line: #e4e9f2;
+      --brand: #3858ff;
+      --brand-soft: #eef1ff;
+      --good: #1f9d62;
+      --warn: #c88400;
+      --danger: #d64545;
+      --purple: #7447ff;
+      --shadow: 0 14px 40px rgba(18, 31, 56, 0.08);
+      --radius: 22px;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background:
+        radial-gradient(circle at top left, rgba(56, 88, 255, 0.12), transparent 32rem),
+        radial-gradient(circle at top right, rgba(116, 71, 255, 0.10), transparent 30rem),
+        var(--bg);
+      color: var(--ink);
+    }
+
+    header {
+      padding: 48px 24px 24px;
+    }
+
+    .container {
+      width: min(1180px, calc(100% - 32px));
+      margin: 0 auto;
+    }
+
+    .hero {
+      background: linear-gradient(135deg, #ffffff, #f3f5ff);
+      border: 1px solid var(--line);
+      border-radius: 32px;
+      box-shadow: var(--shadow);
+      padding: 34px;
+      display: grid;
+      grid-template-columns: 1.4fr 0.8fr;
+      gap: 26px;
+      align-items: center;
+    }
+
+    h1 {
+      font-size: clamp(2rem, 4vw, 4.4rem);
+      line-height: 0.96;
+      margin: 0 0 18px;
+      letter-spacing: -0.06em;
+    }
+
+    h2 {
+      font-size: 1.55rem;
+      margin: 0 0 16px;
+      letter-spacing: -0.03em;
+    }
+
+    h3 {
+      font-size: 1.1rem;
+      margin: 0 0 10px;
+      letter-spacing: -0.02em;
+    }
+
+    p {
+      color: var(--muted);
+      line-height: 1.6;
+      margin: 0;
+    }
+
+    .pill-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 22px;
+    }
+
+    .pill {
+      border: 1px solid var(--line);
+      background: rgba(255, 255, 255, 0.75);
+      border-radius: 999px;
+      padding: 8px 12px;
+      font-size: 0.88rem;
+      color: #33405a;
+      font-weight: 650;
+    }
+
+    .hero-panel {
+      background: #101827;
+      color: white;
+      border-radius: 26px;
+      padding: 22px;
+      min-height: 230px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+    }
+
+    .hero-panel p {
+      color: #cad3e6;
+    }
+
+    .score {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 10px;
+      margin-top: 20px;
+    }
+
+    .score-card {
+      background: rgba(255, 255, 255, 0.09);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      border-radius: 18px;
+      padding: 14px;
+    }
+
+    .score-card strong {
+      display: block;
+      font-size: 1.45rem;
+      letter-spacing: -0.04em;
+    }
+
+    .score-card span {
+      color: #bac5da;
+      font-size: 0.78rem;
+    }
+
+    main {
+      padding: 8px 0 54px;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 18px;
+      margin-top: 18px;
+    }
+
+    .grid-3 {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 18px;
+      margin-top: 18px;
+    }
+
+    .card {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      padding: 24px;
+    }
+
+    .wide {
+      grid-column: 1 / -1;
+    }
+
+    .phase {
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+
+    .phase-top {
+      display: flex;
+      justify-content: space-between;
+      gap: 14px;
+      align-items: flex-start;
+    }
+
+    .tag {
+      border-radius: 999px;
+      padding: 6px 10px;
+      font-size: 0.76rem;
+      font-weight: 750;
+      background: var(--brand-soft);
+      color: var(--brand);
+      white-space: nowrap;
+    }
+
+    .tag.good {
+      background: rgba(31, 157, 98, 0.1);
+      color: var(--good);
+    }
+
+    .tag.warn {
+      background: rgba(200, 132, 0, 0.12);
+      color: var(--warn);
+    }
+
+    .tag.purple {
+      background: rgba(116, 71, 255, 0.12);
+      color: var(--purple);
+    }
+
+    .progress {
+      height: 10px;
+      background: #edf1f7;
+      border-radius: 999px;
+      overflow: hidden;
+    }
+
+    .bar {
+      height: 100%;
+      width: 0%;
+      border-radius: 999px;
+      background: linear-gradient(90deg, var(--brand), var(--purple));
+      transition: width 0.35s ease;
+    }
+
+    .task-list {
+      display: grid;
+      gap: 10px;
+      margin-top: 14px;
+    }
+
+    label.task {
+      display: grid;
+      grid-template-columns: 22px 1fr auto;
+      gap: 10px;
+      align-items: start;
+      padding: 12px;
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      background: #fbfcff;
+    }
+
+    label.task input {
+      margin-top: 2px;
+      transform: scale(1.12);
+      accent-color: var(--brand);
+    }
+
+    label.task span {
+      line-height: 1.35;
+    }
+
+    label.task small {
+      color: var(--muted);
+      white-space: nowrap;
+    }
+
+    .done-text {
+      text-decoration: line-through;
+      color: var(--muted);
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      overflow: hidden;
+      border-radius: 16px;
+      border: 1px solid var(--line);
+    }
+
+    th, td {
+      text-align: left;
+      padding: 12px 14px;
+      border-bottom: 1px solid var(--line);
+      vertical-align: top;
+      font-size: 0.92rem;
+    }
+
+    th {
+      background: #f3f6fb;
+      color: #39465d;
+      font-size: 0.82rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    tr:last-child td {
+      border-bottom: 0;
+    }
+
+    code {
+      background: #eef1f7;
+      color: #22304a;
+      border-radius: 7px;
+      padding: 2px 6px;
+      font-size: 0.88em;
+    }
+
+    pre {
+      background: #101827;
+      color: #e9eefb;
+      border-radius: 18px;
+      padding: 18px;
+      overflow-x: auto;
+      line-height: 1.5;
+      margin: 14px 0 0;
+    }
+
+    textarea, input[type="text"], select {
+      width: 100%;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 12px 14px;
+      font: inherit;
+      background: #fbfcff;
+      color: var(--ink);
+      outline: none;
+    }
+
+    textarea:focus, input[type="text"]:focus, select:focus {
+      border-color: var(--brand);
+      box-shadow: 0 0 0 4px rgba(56, 88, 255, 0.12);
+    }
+
+    textarea {
+      min-height: 150px;
+      resize: vertical;
+      margin-top: 12px;
+    }
+
+    .button-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 14px;
+    }
+
+    button {
+      border: 0;
+      border-radius: 14px;
+      padding: 11px 14px;
+      font-weight: 750;
+      cursor: pointer;
+      background: var(--brand);
+      color: white;
+      box-shadow: 0 8px 18px rgba(56, 88, 255, 0.18);
+    }
+
+    button.secondary {
+      background: #eef1f7;
+      color: #25324a;
+      box-shadow: none;
+    }
+
+    button.danger {
+      background: var(--danger);
+    }
+
+    .timeline {
+      display: grid;
+      gap: 14px;
+      margin-top: 16px;
+    }
+
+    .timeline-item {
+      display: grid;
+      grid-template-columns: 110px 1fr;
+      gap: 14px;
+      align-items: start;
+    }
+
+    .timeline-date {
+      color: var(--brand);
+      font-weight: 800;
+      font-size: 0.9rem;
+    }
+
+    .timeline-body {
+      border-left: 3px solid var(--line);
+      padding-left: 14px;
+    }
+
+    .muted {
+      color: var(--muted);
+    }
+
+    .section-kicker {
+      color: var(--brand);
+      font-weight: 850;
+      text-transform: uppercase;
+      font-size: 0.78rem;
+      letter-spacing: 0.09em;
+      margin-bottom: 8px;
+    }
+
+    .status-row {
+      display: grid;
+      grid-template-columns: 1fr 160px;
+      gap: 12px;
+      align-items: end;
+      margin-top: 12px;
+    }
+
+    .footer {
+      color: var(--muted);
+      text-align: center;
+      padding: 28px 0 0;
+      font-size: 0.88rem;
+    }
+
+    @media (max-width: 860px) {
+      .hero {
+        grid-template-columns: 1fr;
+      }
+
+      .grid, .grid-3 {
+        grid-template-columns: 1fr;
+      }
+
+      .status-row {
+        grid-template-columns: 1fr;
+      }
+
+      .timeline-item {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    @media print {
+      body {
+        background: white;
+      }
+
+      .card, .hero {
+        box-shadow: none;
+      }
+
+      button, .button-row {
+        display: none;
+      }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="container hero">
+      <section>
+        <div class="section-kicker">EPL prediction optimizer</div>
+        <h1>Model Plan & Progress Tracker</h1>
+        <p>
+          A handoff-ready implementation plan for a weekly-refresh football prediction system:
+          Stage A creates 3-result match probabilities, Stage B optimizes season-long picks,
+          and Stage C provides a simple HTML interface for training, execution, review, and performance tracking.
+        </p>
+        <div class="pill-row">
+          <span class="pill">Stage A: probabilities</span>
+          <span class="pill">Stage B: optimizer</span>
+          <span class="pill">Stage C: dashboard</span>
+          <span class="pill">Weekly refresh</span>
+          <span class="pill">Multi-season tracking</span>
+        </div>
+      </section>
+      <aside class="hero-panel">
+        <div>
+          <h2>Overall Progress</h2>
+          <p>Progress is calculated from completed checklist items and saved in this browser.</p>
+        </div>
+        <div>
+          <div class="progress" aria-label="Overall project progress">
+            <div id="overallBar" class="bar"></div>
+          </div>
+          <div class="score">
+            <div class="score-card">
+              <strong id="overallPct">0%</strong>
+              <span>Complete</span>
+            </div>
+            <div class="score-card">
+              <strong id="completedCount">0</strong>
+              <span>Tasks done</span>
+            </div>
+            <div class="score-card">
+              <strong id="totalCount">0</strong>
+              <span>Total tasks</span>
+            </div>
+          </div>
+        </div>
+      </aside>
+    </div>
+  </header>
+
+  <main>
+    <div class="container">
+      <section class="grid-3">
+        <article class="card phase" data-phase="stage-a">
+          <div class="phase-top">
+            <div>
+              <div class="section-kicker">Stage A</div>
+              <h2>Prediction Model</h2>
+              <p>Collect data, build features, train/calibrate 3-result probabilities.</p>
+            </div>
+            <span class="tag">Model</span>
+          </div>
+          <div class="progress"><div class="bar phase-bar"></div></div>
+          <p class="muted phase-pct">0% complete</p>
+          <div class="task-list">
+            <label class="task"><input type="checkbox" data-task="a1" data-phase="stage-a" checked><span>Build data ingestion for football-data.co.uk historical EPL CSVs.</span><small>Done</small></label>
+            <label class="task"><input type="checkbox" data-task="a2" data-phase="stage-a" checked><span>Add ClubElo historical/current Elo ingestion and local cache.</span><small>Done</small></label>
+            <label class="task"><input type="checkbox" data-task="a3" data-phase="stage-a" checked><span>Create team-name mapping layer across sources.</span><small>Done</small></label>
+            <label class="task"><input type="checkbox" data-task="a4" data-phase="stage-a" checked><span>Engineer features: Elo diff, home advantage, rolling form, goal difference, optional market odds.</span><small>Done</small></label>
+            <label class="task"><input type="checkbox" data-task="a5" data-phase="stage-a" checked><span>Train multinomial logistic regression for HOME_WIN / DRAW / AWAY_WIN.</span><small>Done</small></label>
+            <label class="task"><input type="checkbox" data-task="a6" data-phase="stage-a" checked><span>Calibrate probabilities and evaluate log loss, accuracy, Brier-style checks.</span><small>Done</small></label>
+            <label class="task"><input type="checkbox" data-task="a7" data-phase="stage-a" checked><span>Generate prediction table for every remaining eligible fixture.</span><small>Done</small></label>
+          </div>
+        </article>
+
+        <article class="card phase" data-phase="stage-b">
+          <div class="phase-top">
+            <div>
+              <div class="section-kicker">Stage B</div>
+              <h2>Pick Optimizer</h2>
+              <p>Use probabilities to maximize expected contest points under season constraints.</p>
+            </div>
+            <span class="tag purple">Optimizer</span>
+          </div>
+          <div class="progress"><div class="bar phase-bar"></div></div>
+          <p class="muted phase-pct">0% complete</p>
+          <div class="task-list">
+            <label class="task"><input type="checkbox" data-task="b1" data-phase="stage-b" checked><span>Create one candidate row per team per eligible match.</span><small>Done</small></label>
+            <label class="task"><input type="checkbox" data-task="b2" data-phase="stage-b" checked><span>Calculate expected points: 3 × P(win) + 1 × P(draw).</span><small>Done</small></label>
+            <label class="task"><input type="checkbox" data-task="b3" data-phase="stage-b" checked><span>Filter to Saturday/Sunday matches only.</span><small>Done</small></label>
+            <label class="task"><input type="checkbox" data-task="b4" data-phase="stage-b" checked><span>Implement one pick per contest week.</span><small>Done</small></label>
+            <label class="task"><input type="checkbox" data-task="b5" data-phase="stage-b" checked><span>Implement each team selected at least once, at most twice.</span><small>Done</small></label>
+            <label class="task"><input type="checkbox" data-task="b6" data-phase="stage-b" checked><span>Implement each team selected max once home and max once away.</span><small>Done</small></label>
+            <label class="task"><input type="checkbox" data-task="b7" data-phase="stage-b" checked><span>Use OR-Tools or PuLP integer programming solver and save optimized season plan.</span><small>Done</small></label>
+          </div>
+        </article>
+
+        <article class="card phase" data-phase="stage-c">
+          <div class="phase-top">
+            <div>
+              <div class="section-kicker">Stage C</div>
+              <h2>HTML Interface</h2>
+              <p>Review model runs, predictions, picks, actual results, and performance over seasons.</p>
+            </div>
+            <span class="tag good">UI</span>
+          </div>
+          <div class="progress"><div class="bar phase-bar"></div></div>
+          <p class="muted phase-pct">0% complete</p>
+          <div class="task-list">
+            <label class="task"><input type="checkbox" data-task="c1" data-phase="stage-c" checked><span>Create home dashboard with current season summary and next pick.</span><small>Done</small></label>
+            <label class="task"><input type="checkbox" data-task="c2" data-phase="stage-c" checked><span>Add train/refresh controls with model status and metrics.</span><small>Done</small></label>
+            <label class="task"><input type="checkbox" data-task="c3" data-phase="stage-c" checked><span>Add predictions table with filters for team, week, venue, confidence.</span><small>Done</small></label>
+            <label class="task"><input type="checkbox" data-task="c4" data-phase="stage-c" checked><span>Add optimized picks calendar/table for full season.</span><small>Done</small></label>
+            <label class="task"><input type="checkbox" data-task="c5" data-phase="stage-c" checked><span>Add actual result entry/sync and points calculation.</span><small>Done</small></label>
+            <label class="task"><input type="checkbox" data-task="c6" data-phase="stage-c" checked><span>Add multi-season performance dashboard and exportable history.</span><small>Partial</small></label>
+            <label class="task"><input type="checkbox" data-task="c7" data-phase="stage-c" checked><span>Add agent-editable progress/status log.</span><small>Done</small></label>
+          </div>
+        </article>
+      </section>
+
+      <section class="grid">
+        <article class="card wide">
+          <div class="section-kicker">System Architecture</div>
+          <h2>End-to-End Flow</h2>
+          <table>
+            <thead>
+              <tr>
+                <th>Stage</th>
+                <th>Purpose</th>
+                <th>Inputs</th>
+                <th>Outputs</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><strong>Stage A</strong></td>
+                <td>Predict match outcome probabilities.</td>
+                <td>Historical results, ClubElo ratings, fixtures, rolling form, optional odds/xG.</td>
+                <td><code>fixture_probabilities.csv</code> with P(home), P(draw), P(away).</td>
+              </tr>
+              <tr>
+                <td><strong>Stage B</strong></td>
+                <td>Optimize contest picks across the season.</td>
+                <td>Fixture probabilities and contest rules.</td>
+                <td><code>optimized_picks.csv</code> with one selected team per contest week.</td>
+              </tr>
+              <tr>
+                <td><strong>Stage C</strong></td>
+                <td>Operate, review, and track performance visually.</td>
+                <td>Model artifacts, predictions, optimized picks, actual results.</td>
+                <td>HTML dashboard with actions, charts, history, and progress tracking.</td>
+              </tr>
+            </tbody>
+          </table>
+        </article>
+
+        <article class="card">
+          <div class="section-kicker">Contest Rules</div>
+          <h2>Optimization Constraints</h2>
+          <table>
+            <thead>
+              <tr>
+                <th>Rule</th>
+                <th>Implementation</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Eligible days</td>
+                <td>Only Saturday and Sunday matches can become pick candidates.</td>
+              </tr>
+              <tr>
+                <td>Weekly pick</td>
+                <td>Exactly one selected team per contest week.</td>
+              </tr>
+              <tr>
+                <td>Use every team</td>
+                <td>Each EPL team selected at least once.</td>
+              </tr>
+              <tr>
+                <td>Max two uses</td>
+                <td>Each team selected at most twice total.</td>
+              </tr>
+              <tr>
+                <td>Venue limit</td>
+                <td>Each team selected at most once at home and at most once away.</td>
+              </tr>
+            </tbody>
+          </table>
+        </article>
+
+        <article class="card">
+          <div class="section-kicker">Prediction Row</div>
+          <h2>Stage A Output Contract</h2>
+          <pre>{
+  "match_id": 12345,
+  "contest_week": 8,
+  "date": "2026-10-24",
+  "home_team": "Arsenal",
+  "away_team": "Everton",
+  "p_home_win": 0.64,
+  "p_draw": 0.22,
+  "p_away_win": 0.14
+}</pre>
+        </article>
+
+        <article class="card wide">
+          <div class="section-kicker">Candidate Pick Row</div>
+          <h2>Stage B Input Contract</h2>
+          <pre>{
+  "contest_week": 8,
+  "match_id": 12345,
+  "team": "Arsenal",
+  "opponent": "Everton",
+  "venue": "home",
+  "p_win": 0.64,
+  "p_draw": 0.22,
+  "p_loss": 0.14,
+  "expected_points": 2.14
+}</pre>
+        </article>
+      </section>
+
+      <section class="grid">
+        <article class="card">
+          <div class="section-kicker">Implementation Stack</div>
+          <h2>Recommended Tools</h2>
+          <table>
+            <thead>
+              <tr>
+                <th>Layer</th>
+                <th>Tool</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr><td>Data</td><td>Python, pandas, requests, local CSV cache</td></tr>
+              <tr><td>Model</td><td>scikit-learn multinomial logistic regression + calibration</td></tr>
+              <tr><td>Optimizer</td><td>OR-Tools CP-SAT or PuLP</td></tr>
+              <tr><td>Storage</td><td>SQLite for app state, CSV exports for handoff/debugging</td></tr>
+              <tr><td>Backend</td><td>FastAPI or Flask</td></tr>
+              <tr><td>Frontend</td><td>Simple HTML/CSS/JS first, React optional later</td></tr>
+            </tbody>
+          </table>
+        </article>
+
+        <article class="card">
+          <div class="section-kicker">Data Sources</div>
+          <h2>Free Source Plan</h2>
+          <table>
+            <thead>
+              <tr>
+                <th>Source</th>
+                <th>Use</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr><td>football-data.co.uk</td><td>Historical EPL results, scores, odds, match stats.</td></tr>
+              <tr><td>ClubElo API</td><td>Historical/current team Elo ratings.</td></tr>
+              <tr><td>football-data.org</td><td>Upcoming fixtures via free API key.</td></tr>
+              <tr><td>Understat</td><td>Optional later xG features.</td></tr>
+            </tbody>
+          </table>
+        </article>
+
+        <article class="card wide">
+          <div class="section-kicker">Stage C</div>
+          <h2>Dashboard Pages</h2>
+          <table>
+            <thead>
+              <tr>
+                <th>Page</th>
+                <th>Purpose</th>
+                <th>Core Components</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Home</td>
+                <td>Current status and next action.</td>
+                <td>Next pick, model freshness, season score, missing results.</td>
+              </tr>
+              <tr>
+                <td>Train / Refresh</td>
+                <td>Run data refresh, model train, prediction generation, optimization.</td>
+                <td>Buttons, logs, last run metadata, model metrics.</td>
+              </tr>
+              <tr>
+                <td>Predictions</td>
+                <td>Review all match probabilities.</td>
+                <td>Filterable table, team filters, venue filters, confidence sorting.</td>
+              </tr>
+              <tr>
+                <td>Optimized Picks</td>
+                <td>See the planned season path.</td>
+                <td>Weekly table, team usage tracker, home/away usage tracker.</td>
+              </tr>
+              <tr>
+                <td>Results</td>
+                <td>Record actual match outcomes and earned points.</td>
+                <td>Manual result entry, API sync, score calculation.</td>
+              </tr>
+              <tr>
+                <td>Performance</td>
+                <td>Evaluate across seasons.</td>
+                <td>Points total, average points/week, hit rate, calibration, comparison vs greedy baseline.</td>
+              </tr>
+              <tr>
+                <td>Project Progress</td>
+                <td>Track implementation work.</td>
+                <td>Checklist, status notes, changelog, blockers.</td>
+              </tr>
+            </tbody>
+          </table>
+        </article>
+      </section>
+
+      <section class="grid">
+        <article class="card">
+          <div class="section-kicker">Editable Status</div>
+          <h2>Agent Status Notes</h2>
+          <p>The coding agent can update this section directly in the HTML or you can type notes here. Browser edits are saved locally.</p>
+          <div class="status-row">
+            <input id="statusTitle" type="text" value="Implemented UV repo with trainable HTML UI" placeholder="Current focus, e.g. Implementing optimizer constraints" />
+            <select id="statusSelect">
+              <option value="Not started">Not started</option>
+              <option value="In progress">In progress</option>
+              <option value="Blocked">Blocked</option>
+              <option value="Ready for review" selected>Ready for review</option>
+              <option value="Done">Done</option>
+            </select>
+          </div>
+          <textarea id="statusNotes" placeholder="Latest progress, questions, blockers, and decisions...">Created /Users/francosolari/PycharmProjects/epl_prediction_optimizer with uv-managed dependencies, cached full-history football-data pull, ClubElo history cache, calibrated sklearn model training, probability exports, PuLP optimizer constraints, SQLite-backed FastAPI dashboard, stored-data explorer, Challenge Manager for manual submitted picks and override notes, CLI commands, docstrings, README, Ruff lint config, and tests. Verified: uv run ruff check ., uv run pytest, uv run eplpo train, uv run eplpo backtest --season 2526. Current 2025-26 backtest: 11,310 training matches, 347 target matches, 49.6% accuracy, 1.073 log loss, 30 optimized picks, 48 realized points.</textarea>
+          <div class="button-row">
+            <button id="saveNotes">Save notes</button>
+            <button class="secondary" id="exportState">Export progress JSON</button>
+            <button class="danger" id="resetProgress">Reset local progress</button>
+          </div>
+        </article>
+
+        <article class="card">
+          <div class="section-kicker">Milestones</div>
+          <h2>Suggested Delivery Sequence</h2>
+          <div class="timeline">
+            <div class="timeline-item">
+              <div class="timeline-date">Milestone 1 · Done</div>
+              <div class="timeline-body">
+                <h3>Working Data Pull</h3>
+                <p>Implemented football-data.co.uk historical CSV ingestion, football-data.org fixture fetch with offline fallback, ClubElo attach helper, and team-name mapping.</p>
+              </div>
+            </div>
+            <div class="timeline-item">
+              <div class="timeline-date">Milestone 2 · Done</div>
+              <div class="timeline-body">
+                <h3>First Probability Model</h3>
+                <p>Implemented feature engineering, calibrated scikit-learn logistic model, artifact saving, metrics JSON, and normalized fixture probabilities.</p>
+              </div>
+            </div>
+            <div class="timeline-item">
+              <div class="timeline-date">Milestone 3 · Done</div>
+              <div class="timeline-body">
+                <h3>Season Optimizer</h3>
+                <p>Implemented candidate generation and PuLP solver with weekend, weekly, team-use, and home/away usage constraints.</p>
+              </div>
+            </div>
+            <div class="timeline-item">
+              <div class="timeline-date">Milestone 4 · Done</div>
+              <div class="timeline-body">
+                <h3>Usable Dashboard</h3>
+                <p>Implemented FastAPI dashboard with browser buttons to pull data, train, predict, optimize, and run the full pipeline, plus JSON state endpoints.</p>
+              </div>
+            </div>
+            <div class="timeline-item">
+              <div class="timeline-date">Milestone 5 · In progress</div>
+              <div class="timeline-body">
+                <h3>Multi-Season Review</h3>
+                <p>Implemented 2025-26 backtest metrics, stored-data explorer, and Challenge Manager for manual submitted picks, override notes, team/venue usage, and known-result scoring. Remaining: richer cross-season charts and greedy baseline comparison.</p>
+              </div>
+            </div>
+          </div>
+        </article>
+      </section>
+
+      <section class="card" style="margin-top: 18px;">
+        <div class="section-kicker">Agent Instructions</div>
+        <h2>Definition of Done</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>Area</th>
+              <th>Done When</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Data Refresh</td>
+              <td>A single command updates historical data, current fixtures, Elo cache, and generated datasets.</td>
+            </tr>
+            <tr>
+              <td>Model Training</td>
+              <td>A single command trains the model, saves model artifact, and stores metrics with timestamp.</td>
+            </tr>
+            <tr>
+              <td>Prediction Output</td>
+              <td>Every remaining fixture has P(home win), P(draw), and P(away win), summing to 1.</td>
+            </tr>
+            <tr>
+              <td>Optimization</td>
+              <td>Output contains exactly one team per contest week and passes all team usage / venue rules.</td>
+            </tr>
+            <tr>
+              <td>Dashboard</td>
+              <td>User can train, refresh, view predictions, view optimized picks, record actual results, and see season performance.</td>
+            </tr>
+            <tr>
+              <td>Tracking</td>
+              <td>This plan or its app equivalent can be updated over time with completed tasks, notes, blockers, and milestones.</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <div class="footer">
+        Last updated: 2026-05-04 18:38 · Repository implemented at /Users/francosolari/PycharmProjects/epl_prediction_optimizer · Progress saved locally in browser storage.
+      </div>
+    </div>
+  </main>
+
+  <script>
+    const STORAGE_KEY = "epl_optimizer_project_plan_v2";
+
+    function getDefaultState() {
+      return {
+        tasks: {
+          a1: true,
+          a2: true,
+          a3: true,
+          a4: true,
+          a5: true,
+          a6: true,
+          a7: true,
+          b1: true,
+          b2: true,
+          b3: true,
+          b4: true,
+          b5: true,
+          b6: true,
+          b7: true,
+          c1: true,
+          c2: true,
+          c3: true,
+          c4: true,
+          c5: true,
+          c6: true,
+          c7: true
+        },
+        statusTitle: "Implemented UV repo with trainable HTML UI",
+        statusSelect: "Ready for review",
+        statusNotes: "Created /Users/francosolari/PycharmProjects/epl_prediction_optimizer with uv-managed dependencies, cached full-history football-data pull, ClubElo history cache, calibrated sklearn model training, probability exports, PuLP optimizer constraints, SQLite-backed FastAPI dashboard, stored-data explorer, Challenge Manager for manual submitted picks and override notes, CLI commands, docstrings, README, Ruff lint config, and tests. Verified: uv run ruff check ., uv run pytest, uv run eplpo train, uv run eplpo backtest --season 2526. Current 2025-26 backtest: 11,310 training matches, 347 target matches, 49.6% accuracy, 1.073 log loss, 30 optimized picks, 48 realized points."
+      };
+    }
+
+    function loadState() {
+      try {
+        const raw = localStorage.getItem(STORAGE_KEY);
+        if (!raw) return getDefaultState();
+        return { ...getDefaultState(), ...JSON.parse(raw) };
+      } catch {
+        return getDefaultState();
+      }
+    }
+
+    function saveState(state) {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(state, null, 2));
+    }
+
+    function updateProgress() {
+      const checkboxes = Array.from(document.querySelectorAll("input[type='checkbox'][data-task]"));
+      const completed = checkboxes.filter(cb => cb.checked).length;
+      const total = checkboxes.length;
+      const pct = total === 0 ? 0 : Math.round((completed / total) * 100);
+
+      document.getElementById("overallBar").style.width = pct + "%";
+      document.getElementById("overallPct").textContent = pct + "%";
+      document.getElementById("completedCount").textContent = completed;
+      document.getElementById("totalCount").textContent = total;
+
+      checkboxes.forEach(cb => {
+        const text = cb.closest("label").querySelector("span");
+        if (cb.checked) text.classList.add("done-text");
+        else text.classList.remove("done-text");
+      });
+
+      const phases = Array.from(document.querySelectorAll(".phase"));
+      phases.forEach(phase => {
+        const phaseName = phase.dataset.phase;
+        const phaseCheckboxes = Array.from(document.querySelectorAll(`input[data-phase='${phaseName}']`));
+        const phaseCompleted = phaseCheckboxes.filter(cb => cb.checked).length;
+        const phaseTotal = phaseCheckboxes.length;
+        const phasePct = phaseTotal === 0 ? 0 : Math.round((phaseCompleted / phaseTotal) * 100);
+        phase.querySelector(".phase-bar").style.width = phasePct + "%";
+        phase.querySelector(".phase-pct").textContent = `${phasePct}% complete · ${phaseCompleted}/${phaseTotal} tasks`;
+      });
+    }
+
+    function hydrate() {
+      const state = loadState();
+
+      document.querySelectorAll("input[type='checkbox'][data-task]").forEach(cb => {
+        cb.checked = Boolean(state.tasks[cb.dataset.task]);
+        cb.addEventListener("change", () => {
+          const nextState = loadState();
+          nextState.tasks[cb.dataset.task] = cb.checked;
+          saveState(nextState);
+          updateProgress();
+        });
+      });
+
+      document.getElementById("statusTitle").value = state.statusTitle || "";
+      document.getElementById("statusSelect").value = state.statusSelect || "Not started";
+      document.getElementById("statusNotes").value = state.statusNotes || "";
+
+      document.getElementById("saveNotes").addEventListener("click", () => {
+        const nextState = loadState();
+        nextState.statusTitle = document.getElementById("statusTitle").value;
+        nextState.statusSelect = document.getElementById("statusSelect").value;
+        nextState.statusNotes = document.getElementById("statusNotes").value;
+        saveState(nextState);
+        alert("Progress notes saved in this browser.");
+      });
+
+      document.getElementById("exportState").addEventListener("click", () => {
+        const state = loadState();
+        state.exportedAt = new Date().toISOString();
+        const blob = new Blob([JSON.stringify(state, null, 2)], { type: "application/json" });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = "epl_optimizer_progress_state.json";
+        link.click();
+        URL.revokeObjectURL(url);
+      });
+
+      document.getElementById("resetProgress").addEventListener("click", () => {
+        const confirmed = confirm("Reset all local progress and notes for this plan?");
+        if (!confirmed) return;
+        localStorage.removeItem(STORAGE_KEY);
+        location.reload();
+      });
+
+      updateProgress();
+    }
+
+    hydrate();
+  </script>
+</body>
+</html>

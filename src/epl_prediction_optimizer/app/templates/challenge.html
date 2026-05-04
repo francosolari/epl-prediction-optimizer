@@ -1,0 +1,212 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Challenge Manager · EPL Prediction Optimizer</title>
+    <link rel="stylesheet" href="/static/styles.css">
+  </head>
+  <body>
+    <header class="shell-header">
+      <nav class="nav-rail" aria-label="Primary">
+        <a href="/">Dashboard</a>
+        <a class="active" href="/challenge?season={{ season }}">My Picks</a>
+        <a href="/backtest">Backtest</a>
+        <a href="/model">Model</a>
+        <a href="/data">Data</a>
+      </nav>
+      <div class="title-block">
+        <p class="eyebrow">Premier League selection desk</p>
+        <h1>Challenge Manager</h1>
+      </div>
+      <div class="system-state">
+        <span>{{ summary.submitted_picks }} submitted</span>
+        <strong>{{ summary.points }} pts</strong>
+      </div>
+    </header>
+
+    <main class="workspace">
+      <section class="command-strip">
+        <form class="filter-bar" method="get" action="/challenge">
+          <label>
+            <span>Season</span>
+            <input name="season" value="{{ season }}" aria-label="Season">
+          </label>
+          <label>
+            <span>Week</span>
+            <select name="week">
+              <option value="next" {% if week == "next" %}selected{% endif %}>Next open week</option>
+              <option value="all" {% if week == "all" %}selected{% endif %}>All weeks</option>
+              {% for available_week in weeks %}
+                <option value="{{ available_week }}" {% if week == available_week|string %}selected{% endif %}>Week {{ available_week }}</option>
+              {% endfor %}
+            </select>
+          </label>
+          <label>
+            <span>View</span>
+            <select name="view">
+              <option value="all" {% if view == "all" %}selected{% endif %}>All fixtures</option>
+              <option value="open" {% if view == "open" %}selected{% endif %}>Needs pick</option>
+              <option value="picked" {% if view == "picked" %}selected{% endif %}>Picked</option>
+              <option value="close" {% if view == "close" %}selected{% endif %}>Close calls</option>
+              <option value="overrides" {% if view == "overrides" %}selected{% endif %}>Overrides</option>
+            </select>
+          </label>
+          <label>
+            <span>Team</span>
+            <select name="team">
+              <option value="">Any team</option>
+              {% for option in teams %}
+                <option value="{{ option }}" {% if team == option %}selected{% endif %}>{{ option }}</option>
+              {% endfor %}
+            </select>
+          </label>
+          <button>Apply</button>
+        </form>
+      </section>
+
+      <section class="summary-grid" aria-label="Season summary">
+        <div class="metric-tile">
+          <span>Next open week</span>
+          <strong>{{ summary.next_open_week if summary.next_open_week else "Done" }}</strong>
+        </div>
+        <div class="metric-tile">
+          <span>Fixtures loaded</span>
+          <strong>{{ summary.fixtures }}</strong>
+        </div>
+        <div class="metric-tile">
+          <span>Close calls</span>
+          <strong>{{ summary.close_calls }}</strong>
+        </div>
+        <div class="metric-tile">
+          <span>Overrides</span>
+          <strong>{{ summary.overrides }}</strong>
+        </div>
+        <div class="metric-tile">
+          <span>Pending results</span>
+          <strong>{{ summary.pending_results }}</strong>
+        </div>
+      </section>
+
+      <section class="pick-ledger" aria-label="Submitted picks">
+        <div class="section-heading">
+          <h2>Submitted Picks</h2>
+          <p>Actual entries are stored separately from model recommendations.</p>
+        </div>
+        <div class="ledger-row">
+          {% for pick in actual_picks %}
+            <div class="ledger-chip">
+              <span>W{{ pick.contest_week }}</span>
+              <strong>{{ pick.team }}</strong>
+              <em>{{ pick.actual_points if pick.actual_points is not none else "pending" }} pts</em>
+            </div>
+          {% else %}
+            <p class="empty-copy">No submitted picks stored for this season.</p>
+          {% endfor %}
+        </div>
+      </section>
+
+      <section class="fixture-list">
+        <div class="section-heading">
+          <h2>Fixtures</h2>
+          <p>Save the team you actually submit. Add the reason when you override.</p>
+        </div>
+
+        {% for row in rows %}
+          <article class="fixture-row {% if row.actual_pick %}is-picked{% endif %}">
+            <div class="fixture-main">
+              <div class="fixture-meta">
+                <span>Week {{ row.contest_week }}</span>
+                <time>{{ row.date }}</time>
+                {% if row.is_close_call %}<b>Close call</b>{% endif %}
+              </div>
+              <div class="matchup">
+                <div>
+                  <strong>{{ row.home_team }}</strong>
+                  <span>Home · {{ "%.2f"|format(row.home_expected_points) }} xPts</span>
+                </div>
+                <div class="versus">vs</div>
+                <div>
+                  <strong>{{ row.away_team }}</strong>
+                  <span>Away · {{ "%.2f"|format(row.away_expected_points) }} xPts</span>
+                </div>
+              </div>
+              <div class="probability-grid" aria-label="Match probabilities">
+                <div><span>Home</span><strong>{{ "%.0f"|format(row.p_home_win * 100) }}%</strong></div>
+                <div><span>Draw</span><strong>{{ "%.0f"|format(row.p_draw * 100) }}%</strong></div>
+                <div><span>Away</span><strong>{{ "%.0f"|format(row.p_away_win * 100) }}%</strong></div>
+              </div>
+            </div>
+
+            <div class="fixture-decision">
+              <div class="decision-block">
+                <span>Model</span>
+                {% if row.recommended_pick %}
+                  <strong>{{ row.recommended_pick.team }}</strong>
+                  <em>{{ row.recommended_pick.venue }} · {{ "%.2f"|format(row.recommended_pick.expected_points) }} xPts</em>
+                {% else %}
+                  <strong>{{ row.model_favorite }}</strong>
+                  <em>favorite by fixture probability</em>
+                {% endif %}
+              </div>
+              <div class="decision-block">
+                <span>Result</span>
+                <strong>{{ row.result_label }}</strong>
+                <em>{{ row.actual_pick.actual_points if row.actual_pick and row.actual_pick.actual_points is not none else "not scored" }} pts</em>
+              </div>
+              <div class="decision-block">
+                <span>Your pick</span>
+                {% if row.actual_pick %}
+                  <strong>{{ row.actual_pick.team }}</strong>
+                  <em>{% if row.is_override %}override · {% endif %}{{ row.actual_pick.notes or "no note" }}</em>
+                {% else %}
+                  <strong>Not stored</strong>
+                  <em>choose below</em>
+                {% endif %}
+              </div>
+            </div>
+
+            <div class="usage-grid">
+              <div class="{% if row.home_used %}used{% endif %}">
+                <span>{{ row.home_team }}</span>
+                <strong>{{ "team used" if row.home_used else "team open" }}</strong>
+                <em>{{ "home used" if row.home_venue_used else "home open" }}</em>
+              </div>
+              <div class="{% if row.away_used %}used{% endif %}">
+                <span>{{ row.away_team }}</span>
+                <strong>{{ "team used" if row.away_used else "team open" }}</strong>
+                <em>{{ "away used" if row.away_venue_used else "away open" }}</em>
+              </div>
+            </div>
+
+            <div class="quick-pick">
+              <form method="post" action="/manual-picks">
+                <input type="hidden" name="season" value="{{ season }}">
+                <input type="hidden" name="contest_week" value="{{ row.contest_week }}">
+                <input type="hidden" name="match_id" value="{{ row.match_id }}">
+                <input type="hidden" name="team" value="{{ row.home_team }}">
+                <input type="hidden" name="venue" value="home">
+                <input name="notes" placeholder="Note for {{ row.home_team }}">
+                <button>Pick home</button>
+              </form>
+              <form method="post" action="/manual-picks">
+                <input type="hidden" name="season" value="{{ season }}">
+                <input type="hidden" name="contest_week" value="{{ row.contest_week }}">
+                <input type="hidden" name="match_id" value="{{ row.match_id }}">
+                <input type="hidden" name="team" value="{{ row.away_team }}">
+                <input type="hidden" name="venue" value="away">
+                <input name="notes" placeholder="Note for {{ row.away_team }}">
+                <button>Pick away</button>
+              </form>
+            </div>
+          </article>
+        {% else %}
+          <div class="empty-state">
+            <strong>No fixtures match this view.</strong>
+            <span>Adjust the filters or run predict/optimize from the dashboard.</span>
+          </div>
+        {% endfor %}
+      </section>
+    </main>
+  </body>
+</html>

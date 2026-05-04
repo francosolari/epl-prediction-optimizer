@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Stored Input Data · EPL Prediction Optimizer</title>
+    <link rel="stylesheet" href="/static/styles.css">
+  </head>
+  <body>
+    <header class="shell-header">
+      <nav class="nav-rail" aria-label="Primary">
+        <a href="/">Dashboard</a>
+        <a href="/challenge?season=2526">My Picks</a>
+        <a href="/backtest">Backtest</a>
+        <a href="/model">Model</a>
+        <a class="active" href="/data">Data</a>
+      </nav>
+      <div class="title-block">
+        <p class="eyebrow">Cache and artifacts</p>
+        <h1>Stored Input Data</h1>
+      </div>
+      <div class="system-state">
+        <span>CSV files</span>
+        <strong>{{ datasets|length }}</strong>
+      </div>
+    </header>
+    <main class="workspace">
+      <section class="table-section">
+        <div class="section-heading">
+          <h2>Available Artifacts</h2>
+          <p>Preview JSON is capped by the API limit; source CSVs stay local in the repository data folder.</p>
+        </div>
+        <div class="data-table-wrap">
+          <table>
+            <thead>
+              <tr><th>Group</th><th>Dataset</th><th>Rows</th><th>Size</th><th>Preview</th></tr>
+            </thead>
+            <tbody>
+              {% for dataset in datasets %}
+                <tr>
+                  <td>{{ dataset.group }}</td>
+                  <td><strong>{{ dataset.file }}</strong></td>
+                  <td>{{ dataset.rows }}</td>
+                  <td>{{ dataset.size }} bytes</td>
+                  <td><a href="/api/data/{{ dataset.group }}/{{ dataset.name }}">Open JSON</a></td>
+                </tr>
+              {% else %}
+                <tr>
+                  <td colspan="5">No CSV data has been written yet. Run Pull Full History first.</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>

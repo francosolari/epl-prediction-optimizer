@@ -1,0 +1,290 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>EPL Prediction Optimizer</title>
+    <link rel="stylesheet" href="/static/styles.css">
+    <style>
+      .this-week {
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        background: var(--surface);
+        padding: var(--space-xl);
+        display: grid;
+        gap: var(--space-lg);
+      }
+      .recommendation-card {
+        display: grid;
+        grid-template-columns: minmax(0,1fr) auto;
+        align-items: center;
+        gap: var(--space-xl);
+        padding: var(--space-lg);
+        border: 1px solid color-mix(in oklch, var(--pitch), transparent 60%);
+        border-radius: var(--radius);
+        background: color-mix(in oklch, var(--pitch), var(--surface) 90%);
+      }
+      .rec-team {
+        font-size: clamp(1.6rem, 3vw, 2.4rem);
+        font-weight: 820;
+        line-height: 1;
+      }
+      .rec-meta {
+        display: flex;
+        flex-wrap: wrap;
+        gap: var(--space-sm);
+        margin-top: var(--space-xs);
+      }
+      .rec-meta span {
+        font-size: 0.82rem;
+        color: var(--muted);
+      }
+      .rec-xpts {
+        text-align: right;
+      }
+      .rec-xpts strong {
+        display: block;
+        font-size: 2rem;
+        color: var(--pitch-deep);
+        line-height: 1;
+      }
+      .rec-xpts span {
+        color: var(--muted);
+        font-size: 0.78rem;
+      }
+      .no-rec {
+        color: var(--muted);
+        padding: var(--space-lg);
+        text-align: center;
+      }
+      .season-stats {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+        gap: var(--space-sm);
+      }
+      .stat-chip {
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        padding: var(--space-sm) var(--space-md);
+        background: var(--surface);
+        display: grid;
+        gap: 2px;
+      }
+      .stat-chip span { font-size: 0.73rem; color: var(--muted); font-weight: 760; }
+      .stat-chip strong { font-size: 1.3rem; }
+      .picks-table-mini td { padding: var(--space-xs) var(--space-sm); }
+      .pts-3 { color: var(--pitch-deep); font-weight: 780; }
+      .pts-1 { color: var(--muted); }
+      .pts-0 { color: var(--red); }
+      .pipeline-row {
+        display: flex;
+        gap: var(--space-sm);
+        flex-wrap: wrap;
+        align-items: center;
+      }
+      .pipeline-row form { display: contents; }
+      .refresh-note { color: var(--muted); font-size: 0.8rem; }
+      .model-health {
+        display: grid;
+        gap: var(--space-xs);
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        padding: var(--space-md);
+        background: var(--surface);
+      }
+      .model-health-row {
+        display: flex;
+        justify-content: space-between;
+        font-size: 0.82rem;
+      }
+      .model-health-row span { color: var(--muted); }
+    </style>
+  </head>
+  <body>
+    <header class="shell-header">
+      <nav class="nav-rail" aria-label="Primary">
+        <a class="active" href="/">Dashboard</a>
+        <a href="/challenge?season=2526">My Picks</a>
+        <a href="/backtest">Backtest</a>
+        <a href="/model">Model</a>
+        <a href="/data">Data</a>
+      </nav>
+      <div class="title-block">
+        <p class="eyebrow">2025–26 season</p>
+        <h1>EPL Selection Desk</h1>
+      </div>
+      <div class="system-state">
+        <span>{{ status.last_action | default("ready") }}</span>
+        <strong>{{ status.status | default("ready") }}</strong>
+      </div>
+    </header>
+
+    <main class="workspace">
+
+      <!-- Season standing -->
+      <section class="season-stats" aria-label="Season standing">
+        <div class="stat-chip">
+          <span>Total points</span>
+          <strong>{{ season_summary.points }}</strong>
+        </div>
+        <div class="stat-chip">
+          <span>Picks submitted</span>
+          <strong>{{ season_summary.submitted }}</strong>
+        </div>
+        <div class="stat-chip">
+          <span>Wins</span>
+          <strong class="pts-3">{{ season_summary.wins }}</strong>
+        </div>
+        <div class="stat-chip">
+          <span>Draws</span>
+          <strong class="pts-1">{{ season_summary.draws }}</strong>
+        </div>
+        <div class="stat-chip">
+          <span>Losses</span>
+          <strong class="pts-0">{{ season_summary.losses }}</strong>
+        </div>
+        <div class="stat-chip">
+          <span>Avg pts/pick</span>
+          <strong>{{ "%.2f"|format(season_summary.avg_pts) if season_summary.submitted > 0 else "—" }}</strong>
+        </div>
+        <div class="stat-chip">
+          <span>Next open week</span>
+          <strong>{{ season_summary.next_open_week if season_summary.next_open_week else "—" }}</strong>
+        </div>
+        <div class="stat-chip">
+          <span>Pending results</span>
+          <strong>{{ season_summary.pending }}</strong>
+        </div>
+      </section>
+
+      <!-- This week's recommendation -->
+      <section class="this-week">
+        <div class="section-heading">
+          <h2>This Week's Model Pick{% if current_week %} — Week {{ current_week }}{% endif %}</h2>
+          <p>Stage A probability → Stage B optimizer recommendation. Submit your actual pick in My Picks.</p>
+        </div>
+
+        {% if week_recommendation %}
+          <div class="recommendation-card">
+            <div>
+              <div class="rec-team">{{ week_recommendation.team }}</div>
+              <div class="rec-meta">
+                <span>{{ week_recommendation.venue | capitalize }} vs {{ week_recommendation.opponent }}</span>
+                <span>·</span>
+                <span>Week {{ week_recommendation.contest_week }}</span>
+                <span>·</span>
+                <span>{{ week_recommendation.date }}</span>
+              </div>
+            </div>
+            <div class="rec-xpts">
+              <strong>{{ "%.2f"|format(week_recommendation.expected_points) }}</strong>
+              <span>expected pts</span>
+            </div>
+          </div>
+          <a href="/challenge?season=2526&week={{ current_week }}">Record your actual pick for week {{ current_week }} →</a>
+        {% elif picks|length > 0 %}
+          <div class="no-rec">
+            All optimized weeks are covered. <a href="/challenge?season=2526">Review submitted picks →</a>
+          </div>
+        {% else %}
+          <div class="no-rec">
+            No recommendations yet.
+            Run the pipeline to generate picks, then record your actual submission in My Picks.
+          </div>
+        {% endif %}
+      </section>
+
+      <!-- Pipeline + recent picks side by side -->
+      <section class="operations-grid">
+        <div class="operation-panel">
+          <div class="section-heading">
+            <h2>Data &amp; Pipeline</h2>
+            <p>Run weekly after matches complete. Full history rebuild only when needed.</p>
+          </div>
+          <form class="pipeline-row" method="post">
+            <button class="primary-action" formaction="/actions/run-all">Run Full Pipeline</button>
+            <button formaction="/actions/refresh">Refresh Data Only</button>
+            <button formaction="/actions/refresh-full-history">Rebuild History</button>
+          </form>
+          <form class="pipeline-row" method="post">
+            <button formaction="/actions/train">Train Model</button>
+            <button formaction="/actions/predict">Predict</button>
+            <button formaction="/actions/optimize">Optimize</button>
+          </form>
+          {% if status.last_action %}
+            <p class="refresh-note">Last action: {{ status.last_action }} · {{ status.status }}</p>
+          {% endif %}
+
+          <div class="model-health">
+            <div class="section-heading"><h2>Model Health</h2></div>
+            <div class="model-health-row"><span>Predictions loaded</span><strong>{{ predictions|length }}</strong></div>
+            <div class="model-health-row"><span>Optimized picks</span><strong>{{ picks|length }}</strong></div>
+            {% if status.accuracy %}<div class="model-health-row"><span>Training accuracy</span><strong>{{ "%.1f"|format(status.accuracy * 100) }}%</strong></div>{% endif %}
+            {% if status.log_loss %}<div class="model-health-row"><span>Log loss</span><strong>{{ "%.3f"|format(status.log_loss) }}</strong></div>{% endif %}
+            <a href="/model" style="font-size:0.82rem; margin-top:4px;">Full model analysis →</a>
+          </div>
+        </div>
+
+        <div class="operation-panel">
+          <div class="section-heading">
+            <h2>Recent Picks</h2>
+            <p>Your last submitted picks and their results.</p>
+          </div>
+          {% if recent_picks %}
+            <div class="data-table-wrap">
+              <table>
+                <thead>
+                  <tr><th>Wk</th><th>Pick</th><th>Result</th><th>Pts</th></tr>
+                </thead>
+                <tbody>
+                  {% for pick in recent_picks %}
+                    <tr>
+                      <td>{{ pick.contest_week }}</td>
+                      <td><strong>{{ pick.team }}</strong><br><em>{{ pick.venue }}</em></td>
+                      <td>{{ pick.result_label if pick.result_label else "Pending" }}</td>
+                      <td class="{% if pick.actual_points == 3 %}pts-3{% elif pick.actual_points == 1 %}pts-1{% elif pick.actual_points == 0 %}pts-0{% endif %}">
+                        <strong>{{ pick.actual_points if pick.actual_points is not none else "—" }}</strong>
+                      </td>
+                    </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </div>
+            <a href="/challenge?season=2526">All picks and history →</a>
+          {% else %}
+            <p class="empty-copy">No picks recorded yet. <a href="/challenge?season=2526">Go to My Picks →</a></p>
+          {% endif %}
+        </div>
+      </section>
+
+      <!-- Full optimizer output -->
+      <section class="table-section">
+        <div class="section-heading">
+          <h2>Full Season Optimizer Plan</h2>
+          <p>Stage B output — all weeks, ordered by contest week. These are recommendations, not your actual submissions.</p>
+        </div>
+        <div class="data-table-wrap">
+          <table>
+            <thead>
+              <tr><th>Week</th><th>Recommended Team</th><th>Opponent</th><th>Venue</th><th>Expected Pts</th></tr>
+            </thead>
+            <tbody>
+              {% for pick in picks %}
+                <tr {% if pick.contest_week == current_week %}style="background:color-mix(in oklch,var(--gold),var(--surface) 88%)"{% endif %}>
+                  <td>{{ pick.contest_week }}</td>
+                  <td><strong>{{ pick.team }}</strong></td>
+                  <td>{{ pick.opponent }}</td>
+                  <td>{{ pick.venue }}</td>
+                  <td>{{ "%.2f"|format(pick.expected_points) }}</td>
+                </tr>
+              {% else %}
+                <tr><td colspan="5">Run the optimizer to populate recommendations.</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+    </main>
+  </body>
+</html>

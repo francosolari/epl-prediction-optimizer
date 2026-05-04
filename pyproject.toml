@@ -1,0 +1,49 @@
+[project]
+name = "epl-prediction-optimizer"
+version = "0.1.0"
+description = "EPL match probability model and season-long pick optimizer"
+readme = "README.md"
+authors = [
+    { name = "francosolari", email = "fsolari@comcast.net" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.136.1",
+    "httpx>=0.28.1",
+    "jinja2>=3.1.6",
+    "numpy>=2.4.4",
+    "pandas>=3.0.2",
+    "python-dotenv>=1.0.0",
+    "pulp>=3.3.0",
+    "pydantic>=2.13.3",
+    "pytest>=9.0.3",
+    "python-multipart>=0.0.27",
+    "requests>=2.33.1",
+    "scikit-learn>=1.8.0",
+    "uvicorn>=0.46.0",
+    "understatapi>=0.5.2",
+    "selenium<4.9.0",
+]
+
+[project.scripts]
+epl-prediction-optimizer = "epl_prediction_optimizer.cli.main:main"
+eplpo = "epl_prediction_optimizer.cli.main:main"
+
+[build-system]
+requires = ["uv_build>=0.11.8,<0.12.0"]
+build-backend = "uv_build"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.15.12",
+]

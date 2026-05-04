@@ -1,0 +1,548 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>EPL Prediction Model · Research Reference</title>
+  <style>
+    :root {
+      --pitch: #1a7a4a;
+      --pitch-deep: #0f5232;
+      --gold: #c9a84c;
+      --ink: #1a1a2e;
+      --bg: #f8f9fa;
+      --surface: #ffffff;
+      --line: #e2e8f0;
+      --muted: #64748b;
+      --red: #dc2626;
+      --green: #16a34a;
+      --blue: #2563eb;
+      --radius: 8px;
+      --space-xs: 6px;
+      --space-sm: 12px;
+      --space-md: 20px;
+      --space-lg: 32px;
+      --space-xl: 56px;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: var(--bg); color: var(--ink); line-height: 1.6; }
+
+    /* Header */
+    .page-header {
+      background: var(--pitch-deep);
+      color: white;
+      padding: var(--space-xl) var(--space-lg);
+      border-bottom: 4px solid var(--gold);
+    }
+    .page-header .eyebrow { font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.12em; color: var(--gold); margin-bottom: var(--space-xs); }
+    .page-header h1 { font-size: 2rem; font-weight: 700; }
+    .page-header p { color: rgba(255,255,255,0.7); margin-top: var(--space-sm); max-width: 700px; }
+
+    /* Layout */
+    .container { max-width: 960px; margin: 0 auto; padding: var(--space-lg); }
+    .toc { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: var(--space-md); margin-bottom: var(--space-xl); }
+    .toc h2 { font-size: 0.95rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); margin-bottom: var(--space-sm); }
+    .toc ol { padding-left: 20px; }
+    .toc li { margin-bottom: 4px; }
+    .toc a { color: var(--pitch); text-decoration: none; font-size: 0.9rem; }
+    .toc a:hover { text-decoration: underline; }
+
+    /* Sections */
+    section { margin-bottom: var(--space-xl); }
+    section h2 { font-size: 1.35rem; font-weight: 700; color: var(--pitch-deep); border-bottom: 2px solid var(--line); padding-bottom: var(--space-xs); margin-bottom: var(--space-md); }
+    section h3 { font-size: 1.05rem; font-weight: 600; margin: var(--space-md) 0 var(--space-sm); color: var(--ink); }
+    section p { margin-bottom: var(--space-sm); color: #374151; }
+    section ul, section ol { padding-left: 22px; margin-bottom: var(--space-sm); }
+    section li { margin-bottom: 6px; color: #374151; }
+
+    /* Cards */
+    .card-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: var(--space-md); margin: var(--space-md) 0; }
+    .card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: var(--space-md); }
+    .card .badge { display: inline-block; font-size: 0.7rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; padding: 2px 8px; border-radius: 99px; margin-bottom: var(--space-xs); }
+    .badge-high { background: #dcfce7; color: #15803d; }
+    .badge-medium { background: #fef9c3; color: #a16207; }
+    .badge-low { background: #f1f5f9; color: var(--muted); }
+    .badge-new-data { background: #dbeafe; color: #1d4ed8; }
+    .card h4 { font-size: 0.95rem; font-weight: 600; margin-bottom: var(--space-xs); }
+    .card p { font-size: 0.85rem; color: var(--muted); margin: 0; }
+
+    /* Callouts */
+    .callout { border-radius: var(--radius); padding: var(--space-md); margin: var(--space-md) 0; border-left: 4px solid; }
+    .callout-key { background: #f0fdf4; border-color: var(--green); }
+    .callout-warning { background: #fff7ed; border-color: #f97316; }
+    .callout-insight { background: #eff6ff; border-color: var(--blue); }
+    .callout strong { display: block; margin-bottom: 6px; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.06em; }
+
+    /* Code blocks */
+    pre { background: var(--ink); color: #e2e8f0; border-radius: var(--radius); padding: var(--space-md); overflow-x: auto; font-size: 0.82rem; line-height: 1.5; margin: var(--space-sm) 0; }
+    code { font-family: "SF Mono", "Fira Code", "Cascadia Code", monospace; }
+    pre code { color: #93c5fd; }
+
+    /* Tables */
+    .table-wrap { overflow-x: auto; margin: var(--space-md) 0; }
+    table { width: 100%; border-collapse: collapse; font-size: 0.87rem; }
+    thead th { background: var(--pitch-deep); color: white; padding: 8px 12px; text-align: left; font-size: 0.8rem; }
+    tbody td { padding: 8px 12px; border-bottom: 1px solid var(--line); }
+    tbody tr:hover { background: var(--bg); }
+    .pts { font-weight: 700; color: var(--pitch); }
+    .pts-bad { font-weight: 700; color: var(--red); }
+
+    /* Priority list */
+    .priority-item { display: flex; gap: var(--space-md); padding: var(--space-md) 0; border-bottom: 1px solid var(--line); align-items: flex-start; }
+    .priority-item:last-child { border-bottom: none; }
+    .priority-num { flex-shrink: 0; width: 36px; height: 36px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 0.95rem; }
+    .pn-1 { background: var(--pitch); color: white; }
+    .pn-2 { background: var(--gold); color: white; }
+    .pn-3 { background: var(--blue); color: white; }
+    .pn-4 { background: #94a3b8; color: white; }
+    .priority-item h4 { font-size: 0.95rem; font-weight: 600; margin-bottom: 4px; }
+    .priority-item p { font-size: 0.85rem; color: var(--muted); margin: 0; }
+
+    footer { background: var(--ink); color: rgba(255,255,255,0.5); text-align: center; padding: var(--space-lg); font-size: 0.8rem; margin-top: var(--space-xl); }
+  </style>
+</head>
+<body>
+
+<header class="page-header">
+  <p class="eyebrow">EPL Prediction Optimizer · Internal Reference</p>
+  <h1>Model Research &amp; Improvement Roadmap</h1>
+  <p>Findings from FiveThirtyEight, Opta/StatsBomb, academic literature (2018–2024), and the Dixon-Coles tradition —
+  translated into actionable improvements for our two-stage prediction system.</p>
+  <p style="margin-top:8px;font-size:0.8rem;color:rgba(255,255,255,0.45)">Compiled May 2026 · Last updated each experiment cycle</p>
+</header>
+
+<div class="container">
+
+  <nav class="toc">
+    <h2>Contents</h2>
+    <ol>
+      <li><a href="#state-of-art">State of the Art — What the Best Models Actually Do</a></li>
+      <li><a href="#our-data">What's Already in Our Raw Data (Unused)</a></li>
+      <li><a href="#experiments">Experiment Results — What We've Tested</a></li>
+      <li><a href="#priority">Prioritised Improvement Roadmap</a></li>
+      <li><a href="#fivethirtyeight">FiveThirtyEight SPI Deep-Dive</a></li>
+      <li><a href="#dixon-coles">Dixon-Coles &amp; Draw Prediction</a></li>
+      <li><a href="#xg">xG — When It Helps &amp; When It Doesn't</a></li>
+      <li><a href="#betting-odds">Betting Odds as Features</a></li>
+      <li><a href="#academic">Key Academic Findings (2020–2024)</a></li>
+      <li><a href="#sources">Sources</a></li>
+    </ol>
+  </nav>
+
+  <!-- ───── 1. STATE OF THE ART ───── -->
+  <section id="state-of-art">
+    <h2>1. State of the Art — What the Best Models Actually Do</h2>
+
+    <div class="callout callout-key">
+      <strong>Core finding</strong>
+      No single model beats the bookmaking market consistently over large samples. The goal is not to be "smarter" than odds —
+      it's to make better <em>constrained decisions</em> given our season-long pick structure. That's a fundamentally different
+      optimisation target that the market does not model.
+    </div>
+
+    <h3>Accuracy benchmarks (pre-match, three-outcome)</h3>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Approach</th><th>Accuracy</th><th>Notes</th></tr></thead>
+        <tbody>
+          <tr><td>Random baseline</td><td>~33%</td><td>Three equal outcomes</td></tr>
+          <tr><td>Elo only</td><td>52–55%</td><td>Good signal, lacks calibration</td></tr>
+          <tr><td>Bookmaker consensus odds</td><td>55–58%</td><td>Best freely available pre-match signal</td></tr>
+          <tr><td>XGBoost + engineered features</td><td>56–67%</td><td>High variance by study</td></tr>
+          <tr><td>FiveThirtyEight SPI</td><td>~57–60%</td><td>Shot-based; outperforms Elo</td></tr>
+          <tr><td><strong>Our current model (GBM + decay weights)</strong></td><td><strong>54–58%</strong></td><td>Competitive for a goals-only model</td></tr>
+          <tr><td>Neural networks (best reported)</td><td>61–65%</td><td>Requires event-level data (Opta/StatsBomb)</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="callout callout-insight">
+      <strong>Key insight</strong>
+      Accuracy improvements above ~58% pre-match require shot-level or event-level data (xG, pass networks, pressing metrics).
+      The next 2–4 percentage points from our current position are achievable with data we already have or can easily obtain.
+    </div>
+  </section>
+
+  <!-- ───── 2. OUR DATA ───── -->
+  <section id="our-data">
+    <h2>2. What's Already in Our Raw CSVs (Unused)</h2>
+
+    <p>Our football-data.co.uk CSVs contain far more than we parse. Every completed-season CSV from 2000–01 onwards has:</p>
+
+    <div class="card-grid">
+      <div class="card">
+        <span class="badge badge-high">High impact · In-hand</span>
+        <h4>Shots on Target (HST / AST)</h4>
+        <p>Best cheap proxy for xG. Rolling 5-game HST average correlates strongly with future goal-scoring. Available from 2000–01.</p>
+      </div>
+      <div class="card">
+        <span class="badge badge-high">High impact · In-hand</span>
+        <h4>Betting Odds (B365H/D/A, AvgH/D/A)</h4>
+        <p>Market implied probabilities aggregate information (injuries, team news) we can't model. Available from 2002–03. Most powerful feature we're not using.</p>
+      </div>
+      <div class="card">
+        <span class="badge badge-medium">Medium impact · In-hand</span>
+        <h4>Corners (HC / AC)</h4>
+        <p>Attacking pressure proxy. Rolling corners correlate with possession and chance creation. Available from 2000–01.</p>
+      </div>
+      <div class="card">
+        <span class="badge badge-medium">Medium impact · In-hand</span>
+        <h4>Half-time Scores (HTHG / HTAG)</h4>
+        <p>Not useful pre-match, but rolling HT performance (half-time points) indicates fast-start tendencies — useful form signal.</p>
+      </div>
+      <div class="card">
+        <span class="badge badge-medium">Medium impact · In-hand</span>
+        <h4>Yellow / Red Cards (HY, AY, HR, AR)</h4>
+        <p>Disciplinary tendencies affect match dynamics. Teams with high card rates tend to have different home/away draw profiles.</p>
+      </div>
+      <div class="card">
+        <span class="badge badge-new-data">Requires fetch · Free</span>
+        <h4>understat.com xG Data</h4>
+        <p>Per-match xG for/against, available from 2014–15 onwards. The single biggest potential accuracy jump with new data.</p>
+      </div>
+    </div>
+
+    <div class="callout callout-warning">
+      <strong>Important</strong>
+      Shots, corners, and cards are <em>post-match</em> statistics — we can only use their <em>rolling historical averages</em>
+      as pre-match features. Using the current match's stats would be leakage. Our feature pipeline already handles this correctly
+      for goals; the same pattern applies.
+    </div>
+  </section>
+
+  <!-- ───── 3. EXPERIMENTS ───── -->
+  <section id="experiments">
+    <h2>3. Experiment Results — What We've Tested</h2>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>Config</th><th>2324 Pts</th><th>2425 Pts</th><th>Total</th><th>vs Winner (83/86)</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Baseline: LR + sigmoid, original features</td>
+            <td>73</td><td class="pts-bad">77</td><td>150</td><td>−9, −9</td>
+          </tr>
+          <tr>
+            <td>GBM + sigmoid (depth=4, iter=400)</td>
+            <td>73</td><td class="pts">80</td><td>153</td><td>−10, −6</td>
+          </tr>
+          <tr>
+            <td>GBM + isotonic calibration</td>
+            <td>—</td><td class="pts-bad">76</td><td>—</td><td>Isotonic regressed vs sigmoid</td>
+          </tr>
+          <tr>
+            <td>GBM + new features (H2H, decay form, draw tendency)</td>
+            <td class="pts">86</td><td>74</td><td>160</td><td>+3, −12 (variance)</td>
+          </tr>
+          <tr>
+            <td>GBM lighter hyperparams (depth=4, iter=500, l2=0.3)</td>
+            <td>75</td><td>78</td><td>153</td><td>−8, −8</td>
+          </tr>
+          <tr style="background:#f0fdf4">
+            <td><strong>Current best: GBM + new features + exponential time-decay weights</strong></td>
+            <td class="pts"><strong>78</strong></td>
+            <td class="pts"><strong>86</strong></td>
+            <td><strong>164</strong></td>
+            <td><strong>−5, tied with winner</strong></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>Key learnings</h3>
+    <ul>
+      <li><strong>Isotonic calibration hurts</strong> vs sigmoid — needs more data, and our 11k-row training set isn't large enough for it.</li>
+      <li><strong>Exponential time-decay weights</strong> (decay=0.9/season) consistently improve 2425 performance, confirming the recency hypothesis.</li>
+      <li><strong>Pick variance is high</strong>: 33–35 picks means even a few different fixture selections from changed probabilities can swing ±10 points. Both seasons together is the right optimisation target.</li>
+      <li><strong>Expected points are stable (~63–66)</strong> across configs — the model's overall pick quality is similar. Actual points variation above that is match-result luck.</li>
+      <li><strong>Elo is still the dominant feature</strong> (10–20× permutation importance of any other feature). Don't remove it.</li>
+    </ul>
+  </section>
+
+  <!-- ───── 4. PRIORITY ROADMAP ───── -->
+  <section id="priority">
+    <h2>4. Prioritised Improvement Roadmap</h2>
+
+    <div>
+      <div class="priority-item">
+        <div class="priority-num pn-1">1</div>
+        <div>
+          <h4>Rolling shots on target (HST/AST) as features</h4>
+          <p>Already in our raw CSVs. Parse HST/AST per match, build rolling 5-game averages as pre-match features.
+          This is a cheap xG proxy that covers all 25 seasons with shot data. Expect +1–3% accuracy.
+          Implementation: update <code>data/sources.py</code> to extract these columns, add to feature pipeline.</p>
+        </div>
+      </div>
+      <div class="priority-item">
+        <div class="priority-num pn-2">2</div>
+        <div>
+          <h4>Betting market implied probabilities as features</h4>
+          <p>B365H/D/A and AvgH/D/A odds are already in our CSVs from 2002–03. Convert to implied probabilities
+          (1/odds, normalised). Market odds encode team news, injuries, and tactical info we can't model.
+          This is the single biggest expected improvement. Caveat: introduces dependency on historical odds availability.</p>
+        </div>
+      </div>
+      <div class="priority-item">
+        <div class="priority-num pn-3">3</div>
+        <div>
+          <h4>Dixon-Coles draw-probability correction</h4>
+          <p>Post-process Stage A output: apply a small rho adjustment (−0.03 to −0.1) to slightly increase P(draw)
+          for matches where both teams have similar expected goals. Specifically helps with 0-0 and 1-1 under-prediction.
+          Can be implemented as a calibration layer without retraining the GBM.</p>
+        </div>
+      </div>
+      <div class="priority-item">
+        <div class="priority-num pn-4">4</div>
+        <div>
+          <h4>understat.com xG data (2014–15 onwards)</h4>
+          <p>Free API, per-match xGF/xGA available for all EPL teams. Would give us true shot quality signal for ~10 seasons.
+          Rolling xG differential outperforms rolling goal differential for future performance prediction.
+          Requires a new data source module and a join with historical matches on date/team.</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="callout callout-insight">
+      <strong>Stage B optimiser improvements</strong>
+      The ILP optimiser already does near-optimal pick selection given Stage A probabilities. The biggest Stage B gains come
+      from better Stage A calibration (so the probability gaps between picks are more reliable), not from changing the
+      optimisation formulation. One exception: consider a "regret-minimisation" objective variant for weeks where multiple
+      fixtures have similar expected points — currently the ILP is indifferent to ties.
+    </div>
+  </section>
+
+  <!-- ───── 5. FIVETHIRTYEIGHT ───── -->
+  <section id="fivethirtyeight">
+    <h2>5. FiveThirtyEight SPI Deep-Dive</h2>
+
+    <p>FiveThirtyEight's Soccer Power Index (SPI) is the most publicly documented professional football prediction system.
+    It goes substantially beyond Elo:</p>
+
+    <h3>Core components</h3>
+    <ul>
+      <li><strong>Adjusted Goals</strong>: reduces value of goals scored during player-advantage situations (red cards) and
+      late in blowouts — prevents garbage-time goals from inflating ratings.</li>
+      <li><strong>Shot-Based xG</strong>: estimates expected goals from each shot using distance, angle, body part, and
+      individual player conversion history. This is the core signal.</li>
+      <li><strong>Non-Shot xG</strong>: expected goals from non-shooting actions — passes, interceptions, and take-ons
+      in dangerous areas. Captures possession quality beyond shots.</li>
+      <li><strong>Match Importance</strong>: down-weights matches where one team is in garbage time (promotion/relegation
+      already secured). Prevents noise from low-motivation games polluting ratings.</li>
+    </ul>
+
+    <h3>Model architecture</h3>
+    <ul>
+      <li>Projects home and away goals as independent Poisson distributions.</li>
+      <li>Runs 20,000 Monte Carlo season simulations per week — not just match-by-match prediction.</li>
+      <li>Uses 550,000+ matches back to 1888, with time-decay weighting (similar to what we implemented).</li>
+      <li>Opta play-by-play data from 2010 onwards is the backbone — not publicly available.</li>
+    </ul>
+
+    <div class="callout callout-warning">
+      <strong>What we can and cannot replicate</strong>
+      Shot-based xG requires event-level data (Opta, StatsBomb, or understat). Non-shot xG requires pass-tracking data.
+      The Adjusted Goals concept is approximable by discounting goals from matches with red cards — this is achievable.
+      Match Importance could be approximated with our in-season table position features (already implemented).
+    </div>
+  </section>
+
+  <!-- ───── 6. DIXON-COLES ───── -->
+  <section id="dixon-coles">
+    <h2>6. Dixon-Coles &amp; Draw Prediction</h2>
+
+    <p>The Dixon-Coles model (1997) is the statistical foundation of most professional football prediction.
+    Its key insight: standard Poisson models systematically <em>underestimate</em> draws and low-scoring results (0-0, 1-0, 0-1, 1-1).</p>
+
+    <h3>The rho correction</h3>
+    <p>For score outcomes (i, j) where i ≤ 1 and j ≤ 1, Dixon-Coles applies a correction factor τ:</p>
+    <pre><code>τ(i=0, j=0) = 1 - λ_home × λ_away × ρ
+τ(i=1, j=0) = 1 + λ_away × ρ
+τ(i=0, j=1) = 1 + λ_home × ρ
+τ(i=1, j=1) = 1 - ρ
+# All other scores: τ = 1 (unchanged)
+# ρ typically estimated as −0.03 to −0.15 (negative → boosts 0-0 and 1-1 probability)</code></pre>
+
+    <h3>Time decay</h3>
+    <p>Dixon-Coles originally proposed exponential time-weighting of matches — exactly what we implemented in May 2026.
+    Optimal decay found empirically: ξ ≈ 0.00325 per day, or roughly 0.88–0.92 per season — consistent with our 0.9/season.</p>
+
+    <h3>Draw prediction — the hardest problem</h3>
+    <p>Draws are systematically under-predicted by all standard approaches. Specific findings from literature:</p>
+    <ul>
+      <li>A 2025 study achieved 86.7% overall accuracy but substantially lower draw precision.</li>
+      <li>The Soccer Prediction Challenge (2023) explicitly flagged draw prediction as unsolved.</li>
+      <li>Best mitigation: Dixon-Coles rho correction + draw-tendency rolling feature (we have the latter).</li>
+      <li>Class weighting (upweight draw examples during training) helps recall but hurts precision — use carefully.</li>
+      <li>Draw rate varies by team pair — some fixtures are historically draw-heavy (we have H2H draw rate as a feature).</li>
+    </ul>
+
+    <div class="callout callout-key">
+      <strong>Our draw features (already implemented)</strong>
+      We have <code>home_draw_tendency</code>, <code>away_draw_tendency</code> (rolling 10-game draw rates per team)
+      and <code>h2h_draw_rate</code> (last 5 meetings between the specific pair). These are the right features.
+      The next step is the Dixon-Coles post-processing layer on top of our GBM output.
+    </div>
+  </section>
+
+  <!-- ───── 7. XG ───── -->
+  <section id="xg">
+    <h2>7. xG — When It Helps &amp; When It Doesn't</h2>
+
+    <p>xG (expected goals) is often cited as transformative, but the empirical picture is nuanced:</p>
+
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Context</th><th>Best metric</th><th>Accuracy</th><th>Why</th></tr></thead>
+        <tbody>
+          <tr>
+            <td>Post-match (explain result)</td>
+            <td>xG</td><td>65.6%</td>
+            <td>Shots are the only way to score; shot quality reflects actual in-game dominance</td>
+          </tr>
+          <tr>
+            <td>Pre-match (predict result)</td>
+            <td>EPV (expected possession value)</td><td>58.3%</td>
+            <td>Possession quality predicts future shot creation; xG without context is weaker pre-match</td>
+          </tr>
+          <tr>
+            <td>Pre-match (rolling xG average)</td>
+            <td>xG for/against 5-game average</td><td>~56–58%</td>
+            <td>Historical xG is a better quality signal than historical goals (less noisy)</td>
+          </tr>
+          <tr>
+            <td>No xG available</td>
+            <td>Shots on target rolling average</td><td>~55–57%</td>
+            <td>HST is a 0.85-correlation proxy for xG, freely available</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>In 38.7% of EPL matches, the team with higher cumulative xG does NOT win — confirming xG improves calibration
+    but cannot eliminate variance. For our use case (picking one winner per week), this variance matters enormously:
+    a 65% win-probability pick still loses 35% of the time.</p>
+
+    <h3>Practical recommendation</h3>
+    <p>Use rolling shots on target (HST/AST) as the first step — available immediately from our existing CSVs.
+    Fetch understat xG data as a second step for the seasons where it's available (2014–15+), and use it to replace
+    or augment the HST feature for recent seasons.</p>
+  </section>
+
+  <!-- ───── 8. BETTING ODDS ───── -->
+  <section id="betting-odds">
+    <h2>8. Betting Odds as Features</h2>
+
+    <p>Using bookmaker odds as model inputs is controversial but consistently effective in academic literature.
+    The key argument: odds incorporate information we cannot model (injuries confirmed hours before kickoff,
+    tactical surprises, referee assignments, travel fatigue).</p>
+
+    <h3>Available in our CSVs</h3>
+    <ul>
+      <li><strong>B365H / B365D / B365A</strong>: Bet365 opening odds (home win / draw / away win). Available from 2002–03.</li>
+      <li><strong>AvgH / AvgD / AvgA</strong>: Market average opening odds across bookmakers.</li>
+      <li><strong>MaxH / MaxD / MaxA</strong>: Best available odds (highest market efficiency signal).</li>
+      <li><strong>B365CH / B365CD / B365CA</strong>: Bet365 <em>closing</em> odds — closest to kickoff, highest signal quality.</li>
+    </ul>
+
+    <h3>How to use them correctly</h3>
+    <pre><code># Convert odds to implied probability (removes overround)
+p_home_raw = 1 / B365H
+p_draw_raw = 1 / B365D
+p_away_raw = 1 / B365A
+overround = p_home_raw + p_draw_raw + p_away_raw
+p_home = p_home_raw / overround   # normalised implied probability
+p_draw = p_draw_raw / overround
+p_away = p_away_raw / overround</code></pre>
+
+    <div class="callout callout-warning">
+      <strong>Philosophical consideration</strong>
+      Using odds as features means our model is partly a "market refinement" — we're learning where our other features
+      agree or disagree with the market. The value comes from combining odds with our structural features (Elo, form, H2H)
+      which the market also uses but may weight differently for our specific optimisation task (season-long constraint picks).
+      In practice: odds + Elo + form consistently outperforms any single signal alone.
+    </div>
+
+    <h3>Backtesting caution</h3>
+    <p>When backtesting with odds features, ensure you use <em>opening odds</em> (available before the match) not
+    closing odds (which incorporate in-day information). Our CSVs have both — use B365H/D/A, not B365CH/D/A, for pre-match features.</p>
+  </section>
+
+  <!-- ───── 9. ACADEMIC FINDINGS ───── -->
+  <section id="academic">
+    <h2>9. Key Academic Findings (2020–2024)</h2>
+
+    <h3>Most impactful features across studies</h3>
+    <div class="card-grid">
+      <div class="card">
+        <span class="badge badge-high">Consensus high-impact</span>
+        <h4>Elo / Team Rating differential</h4>
+        <p>Appears in virtually every study as the top or second feature. Our implementation is solid.</p>
+      </div>
+      <div class="card">
+        <span class="badge badge-high">Consensus high-impact</span>
+        <h4>Recent form (rolling 5 games)</h4>
+        <p>Win/loss sequence, goals scored/conceded. We have this. Decayed form is the modern refinement.</p>
+      </div>
+      <div class="card">
+        <span class="badge badge-high">Consensus high-impact</span>
+        <h4>Home advantage</h4>
+        <p>Encoded implicitly in our Elo (ClubElo applies home advantage) and explicitly in venue-specific form features.</p>
+      </div>
+      <div class="card">
+        <span class="badge badge-medium">Frequently cited</span>
+        <h4>Shots on target (rolling)</h4>
+        <p>xG proxy, consistently 3rd–5th most important feature in shot-data studies. We can add this now.</p>
+      </div>
+      <div class="card">
+        <span class="badge badge-medium">Frequently cited</span>
+        <h4>Market odds (implied probs)</h4>
+        <p>Outperforms most individual features in isolation. Best used alongside structural features.</p>
+      </div>
+      <div class="card">
+        <span class="badge badge-low">Niche / High data cost</span>
+        <h4>Player quality (FIFA ratings)</h4>
+        <p>2023 PLOS ONE study got F1=0.47 using FIFA position ratings. Requires squad-level data per season.</p>
+      </div>
+    </div>
+
+    <h3>Model architecture findings</h3>
+    <ul>
+      <li><strong>XGBoost / GBM consistently top-performing</strong> for tabular match data — our choice is correct.</li>
+      <li><strong>Neural networks only win when event-level data is available</strong> (Opta play-by-play). On tabular features, GBM is equal or better.</li>
+      <li><strong>Ensemble / stacking</strong>: combining GBM output with a simple Poisson model modestly improves calibration.
+        Diminishing returns vs complexity.</li>
+      <li><strong>Calibration matters more than accuracy</strong> for our use case — Stage B optimizer is sensitive to probability
+        <em>ordering</em> and <em>magnitude</em>, not just which outcome is most likely.</li>
+      <li><strong>Feature engineering &gt; model complexity</strong> for 11k-row datasets. More data or better features beat
+        deeper architectures at this scale.</li>
+    </ul>
+  </section>
+
+  <!-- ───── SOURCES ───── -->
+  <section id="sources">
+    <h2>Sources</h2>
+    <ul>
+      <li>FiveThirtyEight — <em>How Our Club Soccer Predictions Work</em> (methodology page, 2019–2023)</li>
+      <li>Dixon, M.J. &amp; Coles, S.G. — <em>Modelling Association Football Scores and Inefficiencies in the Football Betting Market</em>, Applied Statistics (1997)</li>
+      <li>Hubáček, O. et al. — <em>Exploiting Sports-betting Market Using Machine Learning</em>, IJCAI (2019)</li>
+      <li>Sarangi, A. et al. — <em>A data-driven framework for football match prediction</em>, PLOS ONE (2023)</li>
+      <li>Frontiers in Sports — <em>xG vs EPV vs Elo: Pre-match and Post-match Predictive Power in the Bundesliga</em> (2025)</li>
+      <li>Soccer Prediction Challenge 2023 — draw prediction benchmarks</li>
+      <li>dashee87.github.io — <em>Dixon-Coles and time-weighting implementation in Python</em></li>
+      <li>statsandsnakeoil.com — <em>Dixon-Coles and xG: Together at Last</em> (2018)</li>
+      <li>football-data.co.uk — raw CSV data source (shots, odds, corners available from 2000–01)</li>
+      <li>understat.com — free xG data for EPL from 2014–15 onwards</li>
+    </ul>
+  </section>
+
+</div>
+
+<footer>
+  EPL Prediction Optimizer · Internal Research Reference · Not for external distribution
+</footer>
+
+</body>
+</html>
