@@ -8,7 +8,7 @@ web
 
 ## Users
 
-The primary user is the owner of the app, making one Premier League contest pick each matchweek. They need to make a confident weekly decision quickly while preserving strong options for the rest of the season.
+The primary user is the owner of the app, making one Premier League contest pick each eligible Saturday/Sunday weekend. They need to make a confident decision quickly while preserving strong options for the rest of the season.
 
 ## Product Purpose
 
@@ -20,13 +20,13 @@ Unlike a match-prediction dashboard that ranks this week's favorites in isolatio
 
 ## Operating Context
 
-The product is used before the user's weekly submission deadline and revisited after results are known. The recurring workflow is: refresh live Premier League data, review the current matchweek's ranked choices, inspect future implications, commit the actual submitted pick, track the result, and re-optimize the remaining weeks. The user also needs to look ahead across future matchweeks and review team and venue usage.
+The product is used before the user's weekend submission deadline and revisited after results are known. The recurring workflow is: refresh live Premier League data, review the current eligible weekend's ranked choices, inspect future implications, commit the actual submitted pick, track the result, and re-optimize the remaining contest rounds. The user also needs to look ahead across future schedules and review team and venue usage.
 
 ## Capabilities and Constraints
 
 - Current target season: Premier League 2026–27 (`2627`). The active season must be derived centrally rather than hard-coded across routes and templates.
 - Eligible candidates play on Saturday or Sunday.
-- Exactly one team is selected per contest matchweek.
+- Exactly one team is selected per active Saturday/Sunday contest round. Midweek-only league rounds do not require a pick.
 - Every Premier League team must be selected at least once during the season.
 - A team can be selected at most twice: no more than once at home and once away.
 - Committed user picks are durable constraints for subsequent optimization, not presentation-only annotations.
@@ -38,7 +38,7 @@ The product is used before the user's weekly submission deadline and revisited a
 ## Brand Commitments
 
 - The product must feel like a rigorous data-analysis and prediction-modeling workspace, never a betting or sportsbook product.
-- The chosen durable visual world is an analyst's preparation room: season decisions read as lines in an evolving plan, supported by an ensemble forecast horizon that makes uncertainty and downstream opportunity cost visible.
+- The chosen durable visual world is an analyst's preparation room: season decisions read as lines in an evolving plan, supported by a scenario forecast horizon that compares the downstream opportunity cost of each feasible current-round choice. It does not imply statistical confidence or Monte Carlo uncertainty.
 
 ## Evidence on Hand
 

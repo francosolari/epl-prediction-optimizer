@@ -6,16 +6,16 @@
 
 ## Audience, job, and action
 
-The owner uses the surface each matchweek to compare eligible teams, understand immediate strength versus season-aware value, preview the downstream plan, and commit the team actually submitted. The primary action is `Commit <team>`. The committed pick becomes a hard input to every later optimization.
+The owner uses the surface each eligible Saturday/Sunday contest round to compare teams, understand immediate strength versus season-aware value, preview the downstream plan, and commit the team actually submitted. The primary action is `Commit <team>`. The committed pick becomes a hard input to every later optimization.
 
 ## Content and constraints
 
-- Current season and matchweek, freshness, model readiness, and last successful refresh.
+- Current season, contest round, related league matchweek metadata, freshness, model readiness, and last successful refresh.
 - Ranked candidates with win probability, expected points, immediate rank, season-aware rank, opportunity cost, and first affected future week.
-- Forecast ensemble horizon comparing best-now and best-season trajectories under uncertainty.
+- Scenario forecast horizon with one cumulative path per feasible current-round choice, highlighting best-now and best-season paths without implying statistical confidence.
 - Continuous season move tree showing the active line, displaced choices, and alternates.
 - Same content and interaction hierarchy in light and dark modes.
-- Saturday/Sunday only; one pick per week; every club at least once and at most twice; each club at home at most once and away at most once.
+- Saturday/Sunday only; one pick per active contest round; midweek-only league rounds require none; every club at least once and at most twice; each club at home at most once and away at most once.
 - Never use sportsbook odds, betting language, casino states, or fabricated model claims.
 
 ## Chosen direction
@@ -24,7 +24,7 @@ Preparation Room + Forecast Ensemble, Balanced Horizon composition. The interfac
 
 Approved comp: `.impeccable/mocks/pick-optimizer/ensemble-split-light.webp`
 
-Memorable moment: selecting a candidate makes the ensemble traces and branching season move tree reform together before the user commits.
+Memorable moment: selecting a candidate makes the scenario paths and branching season move tree reform together before the user commits.
 
 ## Comp implementation inventory
 
@@ -32,7 +32,7 @@ Memorable moment: selecting a candidate makes the ensemble traces and branching 
 | --- | --- | --- |
 | Slim navigation and context rail | Ebonized vertical frame; active section marked by a cobalt rule | Semantic HTML/CSS |
 | Integrated candidate comparison | One ruled analytical surface, not a card collection | Semantic table/list + CSS |
-| Forecast ensemble horizon | Dozens of fine uncertainty paths plus labeled best-now and best-season paths; event markers at affected weeks | Authored responsive SVG driven by scenario JSON |
+| Scenario forecast horizon | One fine path per feasible current-round candidate plus labeled best-now and best-season paths; event markers at affected rounds | Authored responsive SVG driven by scenario JSON |
 | Season move tree | Continuous main line with visible displaced and alternate branches across the lower band | Authored responsive SVG/HTML hybrid driven by optimized plans |
 | Paper/slate material | Subtle visible tooth over the workspace; survives both themes without reducing contrast | Generated seamless raster texture, theme-adjusted in CSS |
 | Sparse marginalia | Small equations and analyst notes that clarify decisions and never carry required meaning | Semantic text with restrained handwritten face/fallback |
@@ -43,6 +43,6 @@ Memorable moment: selecting a candidate makes the ensemble traces and branching 
 
 Corners are square to 6px. Hairline rules separate regions; shadows are limited to one shallow elevation where a selected layer must lift. Primary UI uses a narrow grotesk/neutral sans; figures and notation use tabular mono; a restrained serif may appear only in the decision heading. Controls use explicit labels, visible focus, and state conveyed by label/shape as well as color.
 
-## Unresolved decisions
+## Resolved lifecycle
 
-Exact scenario confidence method and the final wording for irreversible versus editable pick commitment will be resolved in implementation planning and tests.
+The selected pick is editable before its fixture kickoff and server-locked at kickoff. The chart compares deterministic counterfactual optimizer scenarios; no confidence bands or simulated probabilities ship in this release.
