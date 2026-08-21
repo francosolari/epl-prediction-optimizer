@@ -69,8 +69,16 @@ def test_backtest_season_trains_on_prior_seasons_and_scores_completed_target(tmp
             )
     matches = pd.DataFrame(historical_rows + target_rows)
 
+    future = matches[matches["season"] == "2425"].copy()
+    future["season"] = "2627"
+    future["match_id"] = future["match_id"].str.replace("2425", "2627")
+    matches = pd.concat([matches, future], ignore_index=True)
+
     result = backtest_season(matches, target_season="2526")
 
     assert result["target_matches"] == 8
+    assert result["training_matches"] == 32
     assert result["optimized_picks"] == 4
     assert result["optimized_points"] >= 0
+    assert 0 <= result["expected_calibration_error"] <= 1
+    assert result["pick_point_mae"] >= 0

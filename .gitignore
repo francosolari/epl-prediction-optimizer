@@ -13,7 +13,7 @@ wheels/
 .env
 
 # Runtime outputs
-data/
+/data/
 
 # Local Impeccable decision sessions
 .impeccable/questions/

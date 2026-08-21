@@ -6,8 +6,11 @@ import pandas as pd
 import pulp
 
 
-def optimize_picks(candidates: pd.DataFrame) -> pd.DataFrame:
-    """Maximize expected points while enforcing contest usage constraints."""
+def optimize_picks(
+    candidates: pd.DataFrame,
+    locked_picks: list[dict[str, object]] | None = None,
+) -> pd.DataFrame:
+    """Maximize expected points while enforcing contest rules and locked picks."""
     if candidates.empty:
         return candidates.copy()
     frame = candidates.reset_index(drop=True).copy()
@@ -31,6 +34,19 @@ def optimize_picks(candidates: pd.DataFrame) -> pd.DataFrame:
         for venue in ["home", "away"]:
             venue_indexes = frame.index[(frame["team"] == team) & (frame["venue"] == venue)]
             problem += pulp.lpSum(variables[index] for index in venue_indexes) <= 1
+    for locked in locked_picks or []:
+        indexes = frame.index[
+            (frame["contest_week"] == int(locked["contest_week"]))
+            & (frame["match_id"].astype(str) == str(locked["match_id"]))
+            & (frame["team"] == str(locked["team"]))
+            & (frame["venue"] == str(locked["venue"]))
+        ]
+        if len(indexes) != 1:
+            raise ValueError(
+                f"Locked pick is not an eligible candidate: week {locked['contest_week']} "
+                f"{locked['team']}"
+            )
+        problem += variables[int(indexes[0])] == 1
     status = problem.solve(pulp.PULP_CBC_CMD(msg=False))
     if pulp.LpStatus[status] != "Optimal":
         raise ValueError(f"No optimal pick plan found: {pulp.LpStatus[status]}")

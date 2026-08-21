@@ -30,14 +30,21 @@ class ModelRun:
         self,
         fixtures: pd.DataFrame,
         season_stats: dict[str, list[int]] | None = None,
-        apply_dc: bool = True,
+        apply_dc: bool = False,
     ) -> pd.DataFrame:
-        """Generate normalized HOME/DRAW/AWAY probabilities for fixtures."""
+        """Generate normalized HOME/DRAW/AWAY probabilities for fixtures.
+
+        The optional draw correction is disabled by default because release
+        backtests have not shown an optimizer benefit from applying it.
+        """
         frame = build_fixture_features(fixtures, season_stats=season_stats).reset_index(drop=True)
         probabilities = self.estimator.predict_proba(frame[FEATURE_COLUMNS])
         classes = list(self.estimator.classes_)
         prob_frame = pd.DataFrame(probabilities, columns=classes)
-        output = frame[["match_id", "contest_week", "date", "home_team", "away_team"]].copy()
+        metadata = ["match_id", "contest_week", "date", "home_team", "away_team"]
+        if "kickoff_utc" in frame:
+            metadata.append("kickoff_utc")
+        output = frame[metadata].copy()
         output["p_home_win"] = prob_frame.get(OUTCOME_HOME, 0.0)
         output["p_draw"] = prob_frame.get(OUTCOME_DRAW, 0.0)
         output["p_away_win"] = prob_frame.get(OUTCOME_AWAY, 0.0)

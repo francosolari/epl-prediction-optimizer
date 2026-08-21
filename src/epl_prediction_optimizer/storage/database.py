@@ -58,6 +58,19 @@ class Database:
                 )
                 """
             )
+            existing_columns = {
+                row["name"]
+                for row in connection.execute("PRAGMA table_info(actual_picks)").fetchall()
+            }
+            migrations = {
+                "kickoff_at": "TEXT",
+                "state": "TEXT NOT NULL DEFAULT 'committed'",
+                "news_risk": "TEXT NOT NULL DEFAULT 'none'",
+                "pick_version": "INTEGER NOT NULL DEFAULT 1",
+            }
+            for column, definition in migrations.items():
+                if column not in existing_columns:
+                    connection.execute(f"ALTER TABLE actual_picks ADD COLUMN {column} {definition}")
             connection.execute(
                 """
                 CREATE TABLE IF NOT EXISTS experiment_runs (
@@ -120,11 +133,25 @@ class Database:
     def upsert_historical_matches(self, matches: "pd.DataFrame") -> int:
         """Bulk upsert historical matches. Returns number of rows written."""
         import pandas as _pd
+
         cols = [
-            "match_id", "season", "date", "contest_week",
-            "home_team", "away_team", "home_goals", "away_goals",
-            "home_elo", "away_elo", "home_shots_ot", "away_shots_ot",
-            "home_odds", "draw_odds", "away_odds", "home_xg", "away_xg",
+            "match_id",
+            "season",
+            "date",
+            "contest_week",
+            "home_team",
+            "away_team",
+            "home_goals",
+            "away_goals",
+            "home_elo",
+            "away_elo",
+            "home_shots_ot",
+            "away_shots_ot",
+            "home_odds",
+            "draw_odds",
+            "away_odds",
+            "home_xg",
+            "away_xg",
         ]
         frame = matches.reindex(columns=cols)
         records = [
@@ -142,6 +169,7 @@ class Database:
     def load_historical_matches(self, season: str | None = None) -> "pd.DataFrame":
         """Load historical matches as a DataFrame, optionally filtered by season."""
         import pandas as _pd
+
         query = "SELECT * FROM historical_matches"
         params: tuple[Any, ...] = ()
         if season:
@@ -157,7 +185,14 @@ class Database:
     def upsert_match_xg(self, xg_frame: "pd.DataFrame") -> int:
         """Bulk upsert Understat xG rows (season, home_team, away_team are the key)."""
         records = [
-            (str(r.season), str(r.date), r.home_team, r.away_team, float(r.home_xg), float(r.away_xg))
+            (
+                str(r.season),
+                str(r.date),
+                r.home_team,
+                r.away_team,
+                float(r.home_xg),
+                float(r.away_xg),
+            )
             for r in xg_frame.itertuples(index=False)
             if hasattr(r, "season")
         ]
@@ -172,6 +207,7 @@ class Database:
     def load_match_xg(self, season: str | None = None) -> "pd.DataFrame":
         """Load Understat xG data as a DataFrame."""
         import pandas as _pd
+
         query = "SELECT * FROM match_xg"
         params: tuple[Any, ...] = ()
         if season:
@@ -201,15 +237,20 @@ class Database:
             connection.execute(
                 """
                 INSERT INTO actual_picks (
-                    season, contest_week, match_id, team, venue, notes, actual_points
+                    season, contest_week, match_id, team, venue, notes, actual_points,
+                    kickoff_at, state, news_risk, pick_version
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
                 ON CONFLICT(season, contest_week) DO UPDATE SET
                     match_id = excluded.match_id,
                     team = excluded.team,
                     venue = excluded.venue,
                     notes = excluded.notes,
                     actual_points = excluded.actual_points,
+                    kickoff_at = excluded.kickoff_at,
+                    state = excluded.state,
+                    news_risk = excluded.news_risk,
+                    pick_version = actual_picks.pick_version + 1,
                     updated_at = CURRENT_TIMESTAMP
                 """,
                 (
@@ -220,9 +261,16 @@ class Database:
                     pick["venue"],
                     pick.get("notes", ""),
                     pick.get("actual_points"),
+                    pick.get("kickoff_at"),
+                    pick.get("state", "committed"),
+                    pick.get("news_risk", "none"),
                 ),
             )
-        return pick
+            row = connection.execute(
+                "SELECT * FROM actual_picks WHERE season = ? AND contest_week = ?",
+                (pick["season"], int(pick["contest_week"])),
+            ).fetchone()
+        return dict(row) if row is not None else pick
 
     def list_actual_picks(self, season: str | None = None) -> list[dict[str, Any]]:
         """List stored user picks, optionally scoped to a season."""

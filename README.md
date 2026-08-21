@@ -19,7 +19,7 @@ uv run pytest
 
 ## Commands
 
-Run the full sample-data pipeline:
+Run the full live-data pipeline:
 
 ```bash
 uv run eplpo run-all
@@ -42,13 +42,14 @@ uv run eplpo serve --port 8000
 
 Then open `http://127.0.0.1:8000`.
 
-From the HTML UI you can run:
+The decision desk automatically refreshes live data at startup and every 30
+minutes while it is running. From the UI you can also manually:
 
 - `Pull Data`
 - `Train Model`
 - `Predict Fixtures`
 - `Optimize Picks`
-- `Run Full Pipeline`
+- `Prepare season`
 - `Explore Stored Data`
 - `Challenge Manager`
 
@@ -60,34 +61,33 @@ points when the result is known.
 For weekly use after the first full-history pull, use:
 
 ```bash
-uv run eplpo refresh --network
+uv run eplpo refresh
 uv run eplpo train
 uv run eplpo predict
 uv run eplpo optimize
 ```
 
-`refresh --network` refreshes the current 2025-26 CSV and reuses cached
+`refresh` refreshes the active 2026-27 season and reuses cached
 historical seasons and ClubElo files. Use `refresh-full-history` only when you
 want to rebuild the long-term historical cache.
 
-Backtest the in-progress 2025-26 season against completed matches:
+Backtest a completed season using only earlier seasons for training:
 
 ```bash
-uv run eplpo backtest --season 2526
+uv run eplpo backtest --season 2425
 ```
 
 ## Live Data
 
-By default, `refresh` uses deterministic sample fixtures so the project works
-offline. To download public data where possible:
+Live fixture refresh requires a football-data.org API key:
 
 ```bash
-FOOTBALL_DATA_ORG_API_KEY=... uv run eplpo run-all --network
+FOOTBALL_DATA_ORG_API_KEY=... uv run eplpo run-all
 ```
 
-The `--network` mode downloads football-data.co.uk historical CSVs and attempts
-to attach current ClubElo ratings. If no football-data.org API key is present,
-fixture refresh falls back to sample fixtures.
+The pipeline downloads public historical results and current ClubElo ratings.
+If live fixtures cannot be verified, it reports the failure instead of silently
+presenting sample data as current.
 
 ## Outputs
 

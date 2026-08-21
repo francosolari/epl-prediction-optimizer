@@ -26,6 +26,7 @@ from epl_prediction_optimizer.data.sources import (
     read_historical_results,
     sample_upcoming_fixtures,
 )
+from epl_prediction_optimizer.ml.analysis import expected_calibration_error
 from epl_prediction_optimizer.ml.features import FEATURE_COLUMNS, build_training_frame
 from epl_prediction_optimizer.ml.model import (
     ModelRun,
@@ -95,9 +96,7 @@ def refresh_data(
     historical = pd.concat(historical_frames, ignore_index=True)
     historical = _attach_elo_cache(historical) if use_network else historical
     fixtures = (
-        _live_fixtures(historical, active_season)
-        if use_network
-        else sample_upcoming_fixtures()
+        _live_fixtures(historical, active_season) if use_network else sample_upcoming_fixtures()
     )
     if use_network:
         fixtures = _attach_elo_cache(fixtures)
@@ -209,10 +208,12 @@ def rebuild_processed_history() -> dict[str, int]:
             openfootball_cache = RAW_DIR / "openfootball" / f"{season_code}_PL_matchdays.csv"
             if official_cache.exists():
                 import pandas as _pd
+
                 official = _pd.read_csv(official_cache)
                 frame = apply_official_gameweeks(frame, official)
             elif openfootball_cache.exists():
                 import pandas as _pd
+
                 official = _pd.read_csv(openfootball_cache)
                 frame = apply_official_gameweeks(frame, official)
             frames.append(frame)
@@ -324,7 +325,15 @@ def backtest_season(
     target_season = target_season or SeasonContext.current_season().code
     completed = matches.dropna(subset=["home_goals", "away_goals"]).copy()
     completed["season_code"] = completed["season"].astype(str).str.zfill(4)
-    train_matches = completed[completed["season_code"] != target_season]
+    target_year = int(target_season[:2])
+    target_year += 1900 if target_year >= 50 else 2000
+    season_year = (
+        completed["season_code"]
+        .str[:2]
+        .astype(int)
+        .map(lambda year: 1900 + year if year >= 50 else 2000 + year)
+    )
+    train_matches = completed[season_year < target_year]
     target_matches = completed[completed["season_code"] == target_season]
     if train_matches.empty or target_matches.empty:
         raise ValueError("Backtest requires completed training matches and target-season matches.")
@@ -333,7 +342,13 @@ def backtest_season(
     # then split by season for train vs evaluate.
     all_features = build_training_frame(completed)
     all_features["season_code"] = all_features["season"].astype(str).str.zfill(4)
-    train_features = all_features[all_features["season_code"] != target_season]
+    feature_year = (
+        all_features["season_code"]
+        .str[:2]
+        .astype(int)
+        .map(lambda year: 1900 + year if year >= 50 else 2000 + year)
+    )
+    train_features = all_features[feature_year < target_year]
     target_features = all_features[all_features["season_code"] == target_season].reset_index(
         drop=True
     )
@@ -368,12 +383,16 @@ def backtest_season(
     log_loss_columns = ["p_away_win", "p_draw", "p_home_win"]
     class_order = ["AWAY_WIN", "DRAW", "HOME_WIN"]
     y_true = evaluated["actual"]
-    y_pred = evaluated[probability_columns].idxmax(axis=1).map(
-        {
-            "p_home_win": "HOME_WIN",
-            "p_draw": "DRAW",
-            "p_away_win": "AWAY_WIN",
-        }
+    y_pred = (
+        evaluated[probability_columns]
+        .idxmax(axis=1)
+        .map(
+            {
+                "p_home_win": "HOME_WIN",
+                "p_draw": "DRAW",
+                "p_away_win": "AWAY_WIN",
+            }
+        )
     )
     candidates = build_pick_candidates(predictions)
     picks = optimize_picks(candidates)
@@ -391,9 +410,22 @@ def backtest_season(
         "target_matches": int(len(target_matches)),
         "accuracy": float(accuracy_score(y_true, y_pred)),
         "log_loss": float(log_loss(y_true, evaluated[log_loss_columns], labels=class_order)),
+        "expected_calibration_error": expected_calibration_error(
+            evaluated[probability_columns].rename(
+                columns={
+                    "p_home_win": "HOME_WIN",
+                    "p_draw": "DRAW",
+                    "p_away_win": "AWAY_WIN",
+                }
+            ),
+            y_true.reset_index(drop=True),
+        ),
         "optimized_picks": int(len(scored_picks)),
         "optimized_points": int(scored_picks["actual_points"].sum()),
         "optimized_expected_points": float(scored_picks["expected_points"].sum()),
+        "pick_point_mae": float(
+            (scored_picks["expected_points"] - scored_picks["actual_points"]).abs().mean()
+        ),
         "winner_points": resolved_winner,
     }
     (ARTIFACT_DIR / f"{target_season}_backtest_metrics.json").write_text(

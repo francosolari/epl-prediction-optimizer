@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Callable
-from contextlib import chdir
+from contextlib import asynccontextmanager, chdir, suppress
+from datetime import UTC, datetime, time
 from pathlib import Path
 from typing import Literal
 
@@ -19,6 +21,8 @@ from epl_prediction_optimizer.challenge import (
     summarize_challenge,
 )
 from epl_prediction_optimizer.config.season import SeasonContext
+from epl_prediction_optimizer.optimizer.candidates import build_pick_candidates
+from epl_prediction_optimizer.optimizer.scenarios import build_scenarios
 from epl_prediction_optimizer.pipeline import (
     WINNER_BENCHMARKS,
     backtest_from_processed,
@@ -33,6 +37,10 @@ from epl_prediction_optimizer.storage.database import Database
 PACKAGE_ROOT = Path(__file__).resolve().parent
 
 
+def _utc_now() -> str:
+    return datetime.now(UTC).isoformat()
+
+
 def create_app(
     database: Database | None = None,
     workdir: Path | str | None = None,
@@ -44,7 +52,54 @@ def create_app(
     runtime_dir.mkdir(parents=True, exist_ok=True)
     active_season = SeasonContext.current_season()
     refresh_mode = "live" if use_live_data else "offline"
-    app = FastAPI(title="EPL Prediction Optimizer")
+
+    @asynccontextmanager
+    async def lifespan(_: FastAPI):
+        task: asyncio.Task[None] | None = None
+
+        async def refresh_loop() -> None:
+            while True:
+                db.set_json(
+                    "status",
+                    {"status": "refreshing", "last_action": "automatic-refresh"},
+                )
+                try:
+                    result = await asyncio.to_thread(
+                        _run_background_pipeline,
+                        runtime_dir,
+                        db,
+                        active_season,
+                    )
+                    db.set_json(
+                        "status",
+                        {
+                            "status": "ready",
+                            "last_action": "automatic-refresh",
+                            "updated_at": _utc_now(),
+                            **result,
+                        },
+                    )
+                except Exception as exc:
+                    db.set_json(
+                        "status",
+                        {
+                            "status": "refresh_failed",
+                            "last_action": "automatic-refresh",
+                            "updated_at": _utc_now(),
+                            "error": str(exc),
+                        },
+                    )
+                await asyncio.sleep(30 * 60)
+
+        if use_live_data:
+            task = asyncio.create_task(refresh_loop())
+        yield
+        if task:
+            task.cancel()
+            with suppress(asyncio.CancelledError):
+                await task
+
+    app = FastAPI(title="EPL Prediction Optimizer", lifespan=lifespan)
     templates = Jinja2Templates(directory=str(PACKAGE_ROOT / "templates"))
     app.mount(
         "/static",
@@ -52,12 +107,55 @@ def create_app(
         name="static",
     )
 
-    @app.get("/", response_class=HTMLResponse)
-    def dashboard(request: Request) -> HTMLResponse:
-        picks = db.get_json("picks", [])
+    def decision_payload(selected_week: int | None = None) -> dict[str, object]:
+        predictions = db.get_json("predictions", [])
         actual_picks = db.list_actual_picks(active_season.code)
+        candidates = (
+            build_pick_candidates(pd.DataFrame(predictions)) if predictions else pd.DataFrame()
+        )
+        weeks = sorted(
+            int(value) for value in candidates.get("contest_week", pd.Series(dtype=int)).unique()
+        )
+        picked_weeks = {int(pick["contest_week"]) for pick in actual_picks}
+        now = datetime.now(UTC)
+        future_weeks = {
+            int(candidate["contest_week"])
+            for candidate in candidates.to_dict(orient="records")
+            if _candidate_kickoff(candidate) > now
+        }
+        next_open = next(
+            (week for week in weeks if week not in picked_weeks and week in future_weeks),
+            None,
+        )
+        week = (
+            selected_week if selected_week in weeks else next_open or (weeks[-1] if weeks else None)
+        )
+        scenarios = build_scenarios(candidates, week, actual_picks) if week is not None else []
+        committed = next((p for p in actual_picks if int(p["contest_week"]) == week), None)
+        for item in scenarios:
+            item["selected"] = bool(
+                committed
+                and committed["match_id"] == item["match_id"]
+                and committed["team"] == item["team"]
+            )
+        return {
+            "predictions": predictions,
+            "actual_picks": actual_picks,
+            "candidates": candidates.to_dict(orient="records") if not candidates.empty else [],
+            "weeks": weeks,
+            "selected_week": week,
+            "next_open_week": next_open,
+            "scenarios": scenarios,
+            "committed": committed,
+        }
+
+    @app.get("/", response_class=HTMLResponse)
+    def dashboard(request: Request, week: int | None = None) -> HTMLResponse:
+        picks = db.get_json("picks", [])
+        decision = decision_payload(week)
+        actual_picks = decision["actual_picks"]
         season_summary = _season_summary(actual_picks)
-        current_week = season_summary["next_open_week"]
+        current_week = decision["selected_week"]
         week_recommendation = next(
             (p for p in picks if current_week and p["contest_week"] == current_week), None
         )
@@ -66,23 +164,99 @@ def create_app(
             request,
             "dashboard.html",
             {
-                "status": db.get_json("status", {"status": "ready"}),
-                "predictions": db.get_json("predictions", []),
+                "status": db.get_json("status", {"status": "needs_refresh"}),
+                "predictions": decision["predictions"],
                 "picks": picks,
                 "season_summary": season_summary,
                 "current_week": current_week,
                 "week_recommendation": week_recommendation,
                 "recent_picks": recent_picks,
                 "season": active_season,
+                "decision": decision,
             },
         )
+
+    @app.get("/api/weeks/{contest_week}")
+    def week_decision(contest_week: int) -> dict[str, object]:
+        payload = decision_payload(contest_week)
+        if payload["selected_week"] != contest_week:
+            raise HTTPException(status_code=404, detail="Contest week not found")
+        return payload
+
+    def commit_pick(contest_week: int, payload: dict[str, object]) -> dict[str, object]:
+        decision = decision_payload(contest_week)
+        scenario = next(
+            (
+                item
+                for item in decision["scenarios"]
+                if item["match_id"] == str(payload.get("match_id"))
+                and item["team"] == str(payload.get("team"))
+                and item["venue"] == str(payload.get("venue"))
+            ),
+            None,
+        )
+        if scenario is None or not scenario.get("feasible"):
+            raise HTTPException(status_code=409, detail="Choice is no longer feasible; refresh")
+        existing = decision["committed"]
+        now = datetime.now(UTC)
+        if existing and existing.get("kickoff_at"):
+            existing_kickoff = datetime.fromisoformat(str(existing["kickoff_at"]))
+            if now >= existing_kickoff:
+                raise HTTPException(
+                    status_code=409, detail="Pick is locked because its match started"
+                )
+        kickoff = _candidate_kickoff(scenario)
+        if now >= kickoff:
+            raise HTTPException(status_code=409, detail="This match has already started")
+        stored = db.upsert_actual_pick(
+            {
+                "season": active_season.code,
+                "contest_week": contest_week,
+                "match_id": scenario["match_id"],
+                "team": scenario["team"],
+                "venue": scenario["venue"],
+                "kickoff_at": kickoff.isoformat(),
+                "notes": str(payload.get("notes", "")),
+                "news_risk": str(payload.get("news_risk", "none")),
+                "actual_points": None,
+                "state": "committed",
+            }
+        )
+        return {"status": "saved", "pick": stored, "decision": decision_payload(contest_week)}
+
+    @app.put("/api/picks/{contest_week}")
+    def put_pick(contest_week: int, payload: dict[str, object]) -> dict[str, object]:
+        return commit_pick(contest_week, payload)
+
+    @app.post("/picks/{contest_week}", response_class=RedirectResponse)
+    def post_pick(
+        contest_week: int,
+        match_id: str = Form(...),
+        team: str = Form(...),
+        venue: str = Form(...),
+        notes: str = Form(""),
+        news_risk: str = Form("none"),
+    ) -> RedirectResponse:
+        commit_pick(
+            contest_week,
+            {
+                "match_id": match_id,
+                "team": team,
+                "venue": venue,
+                "notes": notes,
+                "news_risk": news_risk,
+            },
+        )
+        return RedirectResponse(f"/?week={contest_week}", status_code=303)
 
     @app.get("/model", response_class=HTMLResponse)
     def model_view(request: Request) -> HTMLResponse:
         import json as _json
+
         metrics_path = runtime_dir / "data" / "artifacts" / "metrics.json"
         metrics = _json.loads(metrics_path.read_text()) if metrics_path.exists() else None
         from epl_prediction_optimizer.ml.analysis import backtest_summary_report
+
         _all_backtest_seasons = ["2021", "2122", "2223", "2324", "2425"]
         summary = backtest_summary_report(
             runtime_dir / "data" / "artifacts",
@@ -167,7 +341,20 @@ def create_app(
 
     @app.get("/api/status")
     def status() -> dict[str, object]:
-        return {"status": "ready", **db.get_json("status", {})}
+        return {"status": "needs_refresh", **db.get_json("status", {})}
+
+    @app.get("/api/readiness")
+    def readiness() -> dict[str, object]:
+        state = db.get_json("status", {})
+        return {
+            "season": active_season.code,
+            "status": state.get("status", "needs_refresh"),
+            "last_action": state.get("last_action"),
+            "updated_at": state.get("updated_at"),
+            "predictions": len(db.get_json("predictions", [])),
+            "optimized_picks": len(db.get_json("picks", [])),
+            "source_mode": refresh_mode,
+        }
 
     @app.get("/api/predictions")
     def predictions() -> list[dict[str, object]]:
@@ -228,7 +415,15 @@ def create_app(
             runtime_dir,
             lambda: refresh_data(mode=refresh_mode, season=active_season),
         )
-        db.set_json("status", {"status": "complete", "last_action": "refresh", "outputs": outputs})
+        db.set_json(
+            "status",
+            {
+                "status": "complete",
+                "last_action": "refresh",
+                "outputs": outputs,
+                "updated_at": _utc_now(),
+            },
+        )
         return {"status": "complete", "action": "refresh", "outputs": outputs}
 
     @app.post("/api/refresh-full-history")
@@ -243,7 +438,15 @@ def create_app(
     @app.post("/api/train")
     def train() -> dict[str, object]:
         model_run = _run_action(runtime_dir, lambda: train_from_processed(season=active_season))
-        db.set_json("status", {"status": "complete", "last_action": "train", **model_run.metrics})
+        db.set_json(
+            "status",
+            {
+                "status": "complete",
+                "last_action": "train",
+                "updated_at": _utc_now(),
+                **model_run.metrics,
+            },
+        )
         return {"status": "complete", "action": "train", "metrics": model_run.metrics}
 
     @app.post("/api/predict")
@@ -258,6 +461,7 @@ def create_app(
                 "status": "complete",
                 "last_action": "predict",
                 "predictions": len(prediction_frame),
+                "updated_at": _utc_now(),
             },
         )
         return {"status": "complete", "action": "predict", "predictions": len(prediction_frame)}
@@ -270,7 +474,12 @@ def create_app(
         )
         db.set_json(
             "status",
-            {"status": "complete", "last_action": "optimize", "picks": len(pick_frame)},
+            {
+                "status": "complete",
+                "last_action": "optimize",
+                "picks": len(pick_frame),
+                "updated_at": _utc_now(),
+            },
         )
         return {"status": "complete", "action": "optimize", "picks": len(pick_frame)}
 
@@ -280,7 +489,10 @@ def create_app(
             runtime_dir,
             lambda: run_all_with_database(db, refresh_mode, active_season),
         )
-        db.set_json("status", {"status": "complete", "last_action": "run-all", **result})
+        db.set_json(
+            "status",
+            {"status": "complete", "last_action": "run-all", "updated_at": _utc_now(), **result},
+        )
         return {"status": "complete", "action": "run-all", **result}
 
     @app.post("/api/backtest/{target_season}")
@@ -328,6 +540,16 @@ def run_all_with_database(
     predictions = predict_from_processed(database, season=active_season)
     picks = optimize_from_predictions(database, season=active_season)
     return {"predictions": len(predictions), "picks": len(picks)}
+
+
+def _run_background_pipeline(
+    runtime_dir: Path,
+    database: Database,
+    season: SeasonContext,
+) -> dict[str, int]:
+    """Refresh live inputs and republish decisions from the application lifespan."""
+    with chdir(runtime_dir):
+        return run_all_with_database(database, "live", season)
 
 
 def _run_action[T](runtime_dir: Path, action: Callable[[], T]) -> T:
@@ -407,12 +629,23 @@ def _season_summary(actual_picks: list[dict]) -> dict:
     }
 
 
+def _candidate_kickoff(candidate: dict[str, object]) -> datetime:
+    """Return an aware kickoff, using the legacy date-only 15:00 UTC fallback."""
+    raw = candidate.get("kickoff_utc")
+    if raw and not pd.isna(raw):
+        parsed = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+        return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
+    date_value = datetime.fromisoformat(str(candidate["date"])).date()
+    return datetime.combine(date_value, time(15, 0), tzinfo=UTC)
+
+
 def _recent_picks_with_results(
     runtime_dir: Path,
     actual_picks: list[dict],
     n: int = 6,
 ) -> list[dict]:
     import pandas as pd
+
     results_path = runtime_dir / "data" / "processed" / "historical_matches.csv"
     results_by_id: dict[str, dict] = {}
     if results_path.exists():
@@ -440,6 +673,7 @@ def _recent_picks_with_results(
 
 def _load_backtest_metrics(runtime_dir: Path, season: str) -> dict | None:
     import json
+
     path = runtime_dir / "data" / "artifacts" / f"{season}_backtest_metrics.json"
     if not path.exists():
         return None
@@ -451,6 +685,7 @@ def _load_backtest_metrics(runtime_dir: Path, season: str) -> dict | None:
 
 def _load_backtest_picks(runtime_dir: Path, season: str) -> list[dict]:
     import pandas as pd
+
     path = runtime_dir / "data" / "exports" / f"{season}_backtest_optimized_picks.csv"
     if not path.exists():
         return []
@@ -474,11 +709,14 @@ def _build_chart(picks: list[dict], winner_points: int | None) -> dict | None:
     if not picks:
         return None
     width, height = 600, 160
-    max_pts = max(
-        (winner_points or 0),
-        picks[-1]["cumulative"] if picks else 0,
-        10,
-    ) + 8
+    max_pts = (
+        max(
+            (winner_points or 0),
+            picks[-1]["cumulative"] if picks else 0,
+            10,
+        )
+        + 8
+    )
     n = len(picks)
 
     dots = []
@@ -521,11 +759,7 @@ def _filter_challenge_rows(
     if selected_week != "all" and selected_week is not None:
         filtered = [row for row in filtered if str(row["contest_week"]) == str(selected_week)]
     if team:
-        filtered = [
-            row
-            for row in filtered
-            if row["home_team"] == team or row["away_team"] == team
-        ]
+        filtered = [row for row in filtered if row["home_team"] == team or row["away_team"] == team]
     if view == "open":
         filtered = [row for row in filtered if not row.get("actual_pick")]
     elif view == "picked":

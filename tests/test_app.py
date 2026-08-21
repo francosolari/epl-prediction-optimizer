@@ -16,9 +16,14 @@ def test_app_exposes_dashboard_and_status(tmp_path: Path):
 
     assert home.status_code == 200
     assert "EPL Prediction Optimizer" in home.text
-    assert "Run Full Pipeline" in home.text
+    assert "Prepare season" in home.text
+    assert "Choose this week’s line" in home.text
+    assert "System" in home.text
     assert status.status_code == 200
-    assert status.json()["status"] == "ready"
+    assert status.json()["status"] == "needs_refresh"
+    readiness = client.get("/api/readiness")
+    assert readiness.status_code == 200
+    assert readiness.json()["source_mode"] == "offline"
 
 
 def test_run_all_endpoint_refreshes_trains_predicts_and_optimizes(tmp_path: Path):
@@ -36,6 +41,23 @@ def test_run_all_endpoint_refreshes_trains_predicts_and_optimizes(tmp_path: Path
     assert len(predictions.json()) == 8
     assert len(picks.json()) == 4
     assert status.json()["last_action"] == "run-all"
+
+    future_decision = client.get("/api/weeks/2").json()
+    choice = future_decision["scenarios"][0]
+    saved = client.put(
+        "/api/picks/2",
+        json={key: choice[key] for key in ("match_id", "team", "venue")},
+    )
+    assert saved.status_code == 200
+    assert saved.json()["pick"]["pick_version"] == 1
+
+    past_decision = client.get("/api/weeks/1").json()
+    past_choice = past_decision["scenarios"][0]
+    locked = client.put(
+        "/api/picks/1",
+        json={key: past_choice[key] for key in ("match_id", "team", "venue")},
+    )
+    assert locked.status_code == 409
 
 
 def test_data_explorer_previews_stored_csv_files(tmp_path: Path):
