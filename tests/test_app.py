@@ -66,6 +66,11 @@ def test_all_analysis_surfaces_share_the_theme_control(tmp_path: Path):
         assert response.status_code == 200
         assert 'data-theme="system"' in response.text
         assert "data-theme-toggle" in response.text
+        assert "Decision" in response.text
+        assert "Season" in response.text
+        assert "Backtest" in response.text
+        if route != "/":
+            assert 'class="analysis-page"' in response.text
 
 
 def test_run_all_endpoint_refreshes_trains_predicts_and_optimizes(tmp_path: Path):
@@ -92,6 +97,11 @@ def test_run_all_endpoint_refreshes_trains_predicts_and_optimizes(tmp_path: Path
     )
     assert saved.status_code == 200
     assert saved.json()["pick"]["pick_version"] == 1
+
+    dashboard = client.get("/?week=2")
+    assert "data-chart-scale" in dashboard.text
+    assert "data-week=" in dashboard.text
+    assert "Season move tree" in dashboard.text
 
 
 def test_data_explorer_previews_stored_csv_files(tmp_path: Path):

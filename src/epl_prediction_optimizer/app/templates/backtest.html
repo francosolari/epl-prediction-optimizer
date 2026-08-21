@@ -65,14 +65,15 @@
       .gap-zero     { color: var(--pitch); }
     </style>
   </head>
-  <body>
+  <body class="analysis-page">
     <header class="shell-header">
+      <a class="legacy-brand" href="/">P/O</a>
       <nav class="nav-rail" aria-label="Primary">
-        <a href="/">Dashboard</a>
-        <a href="/challenge?season={{ active_season.code }}">My Picks</a>
-        <a class="active" href="/backtest">Backtest</a>
-        <a href="/model">Model</a>
-        <a href="/data">Data</a>
+        <a href="/"><span>01</span>Decision</a>
+        <a href="/challenge?season={{ active_season.code }}"><span>02</span>Season</a>
+        <a href="/model"><span>03</span>Model</a>
+        <a href="/data"><span>04</span>Data</a>
+        <a class="active" href="/backtest"><span>05</span>Backtest</a>
       </nav>
       <div class="title-block">
         <p class="eyebrow">Historical model evaluation</p>

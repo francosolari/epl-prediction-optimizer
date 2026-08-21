@@ -15,6 +15,7 @@
         <a href="/challenge?season={{ season.code }}"><span>02</span>Season</a>
         <a href="/model"><span>03</span>Model</a>
         <a href="/data"><span>04</span>Data</a>
+        <a href="/backtest"><span>05</span>Backtest</a>
       </nav>
       <div class="rail-status">
         <span class="status-dot"></span>
@@ -77,9 +78,9 @@
         </div>
 
         <div class="forecast-panel">
-          <div class="panel-heading"><div><span class="panel-index">02</span><h2>Scenario forecast horizon</h2></div><p>Re-optimized cumulative expected points</p></div>
+          <div class="panel-heading"><div><span class="panel-index">02</span><h2>Scenario forecast horizon</h2></div><p data-chart-scale>Zoomed to show path separation</p></div>
           <div class="forecast-summary" aria-live="polite"><span data-summary-label>Selected path</span><strong data-summary-title>Choose a candidate</strong><p data-summary-copy>Preview how this decision changes later weeks.</p></div>
-          <div class="chart-wrap"><svg data-forecast-chart viewBox="0 0 720 300" role="img" aria-labelledby="chart-title chart-desc"><title id="chart-title">Candidate season forecast paths</title><desc id="chart-desc">Each line is a re-optimized season plan for one available choice.</desc><g class="chart-grid"></g><g class="chart-paths"></g></svg></div>
+          <div class="chart-wrap"><svg data-forecast-chart viewBox="0 0 720 300" role="img" aria-labelledby="chart-title chart-desc"><title id="chart-title">Candidate season forecast paths</title><desc id="chart-desc">Expected-point difference from the strongest available path at each future week. The vertical scale is zoomed to make small but meaningful differences visible.</desc><g class="chart-grid"></g><g class="chart-paths"></g><g class="chart-markers"></g></svg></div>
           <div class="chart-legend"><span><i class="legend-season"></i>Best season line</span><span><i class="legend-now"></i>Best immediate choice</span><span><i class="legend-alt"></i>Alternatives</span></div>
           <div class="commit-strip">
             <div><span>Selected consequence</span><strong data-commit-summary>Preview a candidate</strong></div>
@@ -89,9 +90,9 @@
       </section>
 
       <section class="move-tree-panel">
-        <div class="panel-heading"><div><span class="panel-index">03</span><h2>Season move tree</h2></div><p data-impact-copy>Changes appear here when you preview a choice.</p></div>
+        <div class="panel-heading"><div><span class="panel-index">03</span><h2>Season move tree</h2></div><p data-impact-copy>Preview a candidate to trace the active line and every reroute.</p></div>
         <div class="move-tree" data-move-tree tabindex="0" aria-label="Season plan by contest week">
-          {% for pick in picks %}<a href="/?week={{ pick.contest_week }}" class="move-node {% if pick.contest_week == decision.selected_week %}is-current{% endif %}"><span>W{{ pick.contest_week }}</span><strong>{{ pick.team }}</strong><small>{{ "%.2f"|format(pick.expected_points) }} xPts</small></a>{% endfor %}
+          {% for pick in picks %}<a href="/?week={{ pick.contest_week }}" class="move-node {% if pick.contest_week == decision.selected_week %}is-current{% endif %}" data-week="{{ pick.contest_week }}" data-team="{{ pick.team }}" data-ev="{{ pick.expected_points }}"><span>W{{ pick.contest_week }}</span><strong>{{ pick.team }}</strong><small>{{ "%.2f"|format(pick.expected_points) }} xPts</small></a>{% endfor %}
         </div>
       </section>
 
