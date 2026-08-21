@@ -16,7 +16,7 @@ def test_app_exposes_dashboard_and_status(tmp_path: Path):
 
     assert home.status_code == 200
     assert "EPL Prediction Optimizer" in home.text
-    assert "Run Weekly Pipeline" in home.text
+    assert "Run Full Pipeline" in home.text
     assert status.status_code == 200
     assert status.json()["status"] == "ready"
 

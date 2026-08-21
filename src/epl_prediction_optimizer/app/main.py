@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from contextlib import chdir
 from pathlib import Path
+from typing import Literal
 
 import pandas as pd
 from fastapi import FastAPI, Form, HTTPException, Request
@@ -17,6 +18,7 @@ from epl_prediction_optimizer.challenge import (
     score_manual_pick,
     summarize_challenge,
 )
+from epl_prediction_optimizer.config.season import SeasonContext
 from epl_prediction_optimizer.pipeline import (
     WINNER_BENCHMARKS,
     backtest_from_processed,
@@ -40,6 +42,8 @@ def create_app(
     db = database or Database()
     runtime_dir = Path(workdir or ".").resolve()
     runtime_dir.mkdir(parents=True, exist_ok=True)
+    active_season = SeasonContext.current_season()
+    refresh_mode = "live" if use_live_data else "offline"
     app = FastAPI(title="EPL Prediction Optimizer")
     templates = Jinja2Templates(directory=str(PACKAGE_ROOT / "templates"))
     app.mount(
@@ -51,7 +55,7 @@ def create_app(
     @app.get("/", response_class=HTMLResponse)
     def dashboard(request: Request) -> HTMLResponse:
         picks = db.get_json("picks", [])
-        actual_picks = db.list_actual_picks("2526")
+        actual_picks = db.list_actual_picks(active_season.code)
         season_summary = _season_summary(actual_picks)
         current_week = season_summary["next_open_week"]
         week_recommendation = next(
@@ -69,6 +73,7 @@ def create_app(
                 "current_week": current_week,
                 "week_recommendation": week_recommendation,
                 "recent_picks": recent_picks,
+                "season": active_season,
             },
         )
 
@@ -77,7 +82,6 @@ def create_app(
         import json as _json
         metrics_path = runtime_dir / "data" / "artifacts" / "metrics.json"
         metrics = _json.loads(metrics_path.read_text()) if metrics_path.exists() else None
-        from epl_prediction_optimizer.pipeline import WINNER_BENCHMARKS
         from epl_prediction_optimizer.ml.analysis import backtest_summary_report
         _all_backtest_seasons = ["2021", "2122", "2223", "2324", "2425"]
         summary = backtest_summary_report(
@@ -92,6 +96,7 @@ def create_app(
                 "metrics": metrics,
                 "backtest_summary": summary.to_dict(orient="records") if not summary.empty else [],
                 "experiments": experiments,
+                "season": active_season,
             },
         )
 
@@ -112,6 +117,7 @@ def create_app(
                 "metrics": metrics,
                 "picks": picks,
                 "chart": chart,
+                "active_season": active_season,
             },
         )
 
@@ -122,26 +128,29 @@ def create_app(
             "data.html",
             {
                 "datasets": _list_datasets(runtime_dir),
+                "season": active_season,
             },
         )
 
     @app.get("/challenge", response_class=HTMLResponse)
     def challenge_manager(
         request: Request,
-        season: str = "2526",
+        season: str | None = None,
         week: str = "next",
         view: str = "all",
         team: str = "",
     ) -> HTMLResponse:
-        actual_picks = db.list_actual_picks(season)
-        rows = load_challenge_rows(runtime_dir, season, actual_picks)
+        selected_season = season or active_season.code
+        actual_picks = db.list_actual_picks(selected_season)
+        rows = load_challenge_rows(runtime_dir, selected_season, actual_picks)
         summary = summarize_challenge(rows, actual_picks)
         filtered_rows = _filter_challenge_rows(rows, week, view, team, summary)
         return templates.TemplateResponse(
             request,
             "challenge.html",
             {
-                "season": season,
+                "season": selected_season,
+                "season_context": active_season,
                 "week": week,
                 "view": view,
                 "team": team,
@@ -215,13 +224,16 @@ def create_app(
 
     @app.post("/api/refresh")
     def refresh() -> dict[str, object]:
-        outputs = _run_action(runtime_dir, lambda: refresh_data(use_network=use_live_data))
+        outputs = _run_action(
+            runtime_dir,
+            lambda: refresh_data(mode=refresh_mode, season=active_season),
+        )
         db.set_json("status", {"status": "complete", "last_action": "refresh", "outputs": outputs})
         return {"status": "complete", "action": "refresh", "outputs": outputs}
 
     @app.post("/api/refresh-full-history")
     def refresh_history() -> dict[str, object]:
-        outputs = _run_action(runtime_dir, refresh_full_history)
+        outputs = _run_action(runtime_dir, lambda: refresh_full_history(season=active_season))
         db.set_json(
             "status",
             {"status": "complete", "last_action": "refresh-full-history", "outputs": outputs},
@@ -230,13 +242,16 @@ def create_app(
 
     @app.post("/api/train")
     def train() -> dict[str, object]:
-        model_run = _run_action(runtime_dir, train_from_processed)
+        model_run = _run_action(runtime_dir, lambda: train_from_processed(season=active_season))
         db.set_json("status", {"status": "complete", "last_action": "train", **model_run.metrics})
         return {"status": "complete", "action": "train", "metrics": model_run.metrics}
 
     @app.post("/api/predict")
     def predict() -> dict[str, object]:
-        prediction_frame = _run_action(runtime_dir, lambda: predict_from_processed(db))
+        prediction_frame = _run_action(
+            runtime_dir,
+            lambda: predict_from_processed(db, season=active_season),
+        )
         db.set_json(
             "status",
             {
@@ -249,7 +264,10 @@ def create_app(
 
     @app.post("/api/optimize")
     def optimize() -> dict[str, object]:
-        pick_frame = _run_action(runtime_dir, lambda: optimize_from_predictions(db))
+        pick_frame = _run_action(
+            runtime_dir,
+            lambda: optimize_from_predictions(db, season=active_season),
+        )
         db.set_json(
             "status",
             {"status": "complete", "last_action": "optimize", "picks": len(pick_frame)},
@@ -258,7 +276,10 @@ def create_app(
 
     @app.post("/api/run-all")
     def run_full_pipeline() -> dict[str, object]:
-        result = _run_action(runtime_dir, lambda: run_all_with_database(db, use_live_data))
+        result = _run_action(
+            runtime_dir,
+            lambda: run_all_with_database(db, refresh_mode, active_season),
+        )
         db.set_json("status", {"status": "complete", "last_action": "run-all", **result})
         return {"status": "complete", "action": "run-all", **result}
 
@@ -283,7 +304,7 @@ def create_app(
             "predict": predict,
             "optimize": optimize,
             "run-all": run_full_pipeline,
-            "backtest-2526": lambda: backtest("2526"),
+            "backtest-current": lambda: backtest(active_season.code),
             "backtest-2425": lambda: backtest_season_redirect("2425"),
             "backtest-2324": lambda: backtest_season_redirect("2324"),
         }
@@ -295,12 +316,17 @@ def create_app(
     return app
 
 
-def run_all_with_database(database: Database, use_live_data: bool = True) -> dict[str, int]:
+def run_all_with_database(
+    database: Database,
+    mode: Literal["live", "offline"] = "live",
+    season: SeasonContext | None = None,
+) -> dict[str, int]:
     """Run the full pipeline while writing prediction and pick state to the UI database."""
-    refresh_data(use_network=use_live_data)
-    train_from_processed()
-    predictions = predict_from_processed(database)
-    picks = optimize_from_predictions(database)
+    active_season = season or SeasonContext.current_season()
+    refresh_data(mode=mode, season=active_season)
+    train_from_processed(season=active_season)
+    predictions = predict_from_processed(database, season=active_season)
+    picks = optimize_from_predictions(database, season=active_season)
     return {"predictions": len(predictions), "picks": len(picks)}
 
 
@@ -363,8 +389,7 @@ def _season_summary(actual_picks: list[dict]) -> dict:
     submitted = len(actual_picks)
     avg_pts = points / submitted if submitted else 0.0
     picked_weeks = {int(p["contest_week"]) for p in actual_picks}
-    # find next open week from picks stored in DB (won't know all weeks without predictions)
-    all_weeks = sorted(picked_weeks | {int(p["contest_week"]) for p in actual_picks})
+    # Find next open week from picks stored in DB (won't know all weeks without predictions).
     next_open = None
     for w in range(1, 40):
         if w not in picked_weeks:
@@ -382,7 +407,11 @@ def _season_summary(actual_picks: list[dict]) -> dict:
     }
 
 
-def _recent_picks_with_results(runtime_dir: Path, actual_picks: list[dict], n: int = 6) -> list[dict]:
+def _recent_picks_with_results(
+    runtime_dir: Path,
+    actual_picks: list[dict],
+    n: int = 6,
+) -> list[dict]:
     import pandas as pd
     results_path = runtime_dir / "data" / "processed" / "historical_matches.csv"
     results_by_id: dict[str, dict] = {}

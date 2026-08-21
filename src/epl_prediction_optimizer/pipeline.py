@@ -3,29 +3,35 @@
 from __future__ import annotations
 
 import json
+import os
+from typing import Literal
 
 import joblib
 import pandas as pd
 import requests
 from sklearn.metrics import accuracy_score, log_loss
 
+from epl_prediction_optimizer.config.season import SeasonContext
 from epl_prediction_optimizer.data.sources import (
     DEFAULT_SEASON_CODES,
-    OPENFOOTBALL_SEASON_CODES,
     UNDERSTAT_SEASON_CODES,
     apply_official_gameweeks,
     attach_historical_elo,
     attach_understat_xg,
     download_historical_results,
     fetch_clubelo_history,
-    fetch_openfootball_gameweeks,
     fetch_understat_xg,
     fetch_upcoming_fixtures,
     get_cached_pl_matches,
     read_historical_results,
+    sample_upcoming_fixtures,
 )
 from epl_prediction_optimizer.ml.features import FEATURE_COLUMNS, build_training_frame
-from epl_prediction_optimizer.ml.model import ModelRun, apply_dixon_coles_correction, season_decay_weights, train_model
+from epl_prediction_optimizer.ml.model import (
+    ModelRun,
+    season_decay_weights,
+    train_model,
+)
 from epl_prediction_optimizer.optimizer.candidates import build_pick_candidates
 from epl_prediction_optimizer.optimizer.solver import optimize_picks
 from epl_prediction_optimizer.paths import (
@@ -38,16 +44,32 @@ from epl_prediction_optimizer.paths import (
 from epl_prediction_optimizer.storage.database import Database
 
 
+class LiveFixturesUnavailableError(RuntimeError):
+    """Raised when a live refresh cannot retrieve live EPL fixtures."""
+
+    def __init__(self, season: SeasonContext) -> None:
+        self.season = season
+        super().__init__(f"Live fixtures for season {season.code} are unavailable.")
+
+
 def refresh_data(
     seasons: list[str] | None = None,
-    use_network: bool = False,
     force_current: bool = True,
+    *,
+    mode: Literal["live", "offline"],
+    season: SeasonContext | None = None,
 ) -> dict[str, str]:
     """Refresh processed historical match and fixture CSVs."""
+    active_season = season or SeasonContext.current_season()
+    use_network = mode == "live"
     ensure_data_dirs()
     if use_network and seasons is None and (PROCESSED_DIR / "historical_matches.csv").exists():
-        return refresh_current_season(force=force_current)
-    seasons = seasons or (DEFAULT_SEASON_CODES if use_network else ["2526"])
+        return refresh_current_season(season=active_season, force=force_current)
+    seasons = seasons or (
+        [*DEFAULT_SEASON_CODES, active_season.code]
+        if use_network and active_season.code not in DEFAULT_SEASON_CODES
+        else DEFAULT_SEASON_CODES
+    )
     historical_frames = []
     if use_network:
         for season in seasons:
@@ -57,7 +79,7 @@ def refresh_data(
                         download_historical_results(
                             season,
                             RAW_DIR / "football-data" / f"{season}_E0.csv",
-                            force=force_current and season == "2526",
+                            force=force_current and season == active_season.code,
                         ),
                         season,
                     )
@@ -72,9 +94,11 @@ def refresh_data(
         historical_frames.append(_sample_historical_results())
     historical = pd.concat(historical_frames, ignore_index=True)
     historical = _attach_elo_cache(historical) if use_network else historical
-    fixtures = _fixtures_from_current_season(historical, "2526")
-    if fixtures.empty:
-        fixtures = fetch_upcoming_fixtures()
+    fixtures = (
+        _live_fixtures(historical, active_season)
+        if use_network
+        else sample_upcoming_fixtures()
+    )
     if use_network:
         fixtures = _attach_elo_cache(fixtures)
     historical_path = PROCESSED_DIR / "historical_matches.csv"
@@ -93,16 +117,15 @@ def refresh_data(
     }
 
 
-def train_from_processed() -> ModelRun:
+def train_from_processed(season: SeasonContext | None = None) -> ModelRun:
     """Train from processed historical CSVs and save model artifacts."""
     ensure_data_dirs()
     matches = pd.read_csv(PROCESSED_DIR / "historical_matches.csv").dropna(
         subset=["home_goals", "away_goals"]
     )
     training = build_training_frame(matches)
-    import datetime
-    current_season = str(datetime.date.today().year)[-2:] + str(datetime.date.today().year + 1)[-2:]
-    weights = season_decay_weights(training["season"], reference_season=current_season)
+    active_season = season or SeasonContext.current_season()
+    weights = season_decay_weights(training["season"], reference_season=active_season.code)
     model_run = train_model(training, sample_weight=weights)
     joblib.dump(model_run, ARTIFACT_DIR / "model.joblib")
     (ARTIFACT_DIR / "metrics.json").write_text(
@@ -112,12 +135,16 @@ def train_from_processed() -> ModelRun:
     return model_run
 
 
-def predict_from_processed(database: Database | None = None) -> pd.DataFrame:
+def predict_from_processed(
+    database: Database | None = None,
+    season: SeasonContext | None = None,
+) -> pd.DataFrame:
     """Generate probabilities from saved fixtures and persist CSV/app state."""
     ensure_data_dirs()
     model_run: ModelRun = joblib.load(ARTIFACT_DIR / "model.joblib")
     fixtures = pd.read_csv(PROCESSED_DIR / "fixtures.csv")
-    current_stats = _compute_current_season_stats()
+    active_season = season or SeasonContext.current_season()
+    current_stats = _compute_current_season_stats(active_season)
     predictions = model_run.predict(fixtures, season_stats=current_stats)
     output_path = EXPORT_DIR / "fixture_probabilities.csv"
     predictions.to_csv(output_path, index=False)
@@ -125,7 +152,10 @@ def predict_from_processed(database: Database | None = None) -> pd.DataFrame:
     return predictions
 
 
-def optimize_from_predictions(database: Database | None = None) -> pd.DataFrame:
+def optimize_from_predictions(
+    database: Database | None = None,
+    season: SeasonContext | None = None,
+) -> pd.DataFrame:
     """Build candidates from probabilities and persist optimized picks."""
     ensure_data_dirs()
     predictions = pd.read_csv(EXPORT_DIR / "fixture_probabilities.csv")
@@ -135,16 +165,25 @@ def optimize_from_predictions(database: Database | None = None) -> pd.DataFrame:
     picks.to_csv(output_path, index=False)
     db = database or Database()
     db.set_json("picks", picks.to_dict(orient="records"))
-    db.set_json("status", {"status": "ready", "optimized_picks": len(picks)})
+    active_season = season or SeasonContext.current_season()
+    db.set_json(
+        "status",
+        {"status": "ready", "optimized_picks": len(picks), "season": active_season.code},
+    )
     return picks
 
 
-def run_all(use_network: bool = False) -> dict[str, int]:
+def run_all(
+    *,
+    mode: Literal["live", "offline"],
+    season: SeasonContext | None = None,
+) -> dict[str, int]:
     """Run the full offline or live-data pipeline."""
-    refresh_data(use_network=use_network)
-    train_from_processed()
-    predictions = predict_from_processed()
-    picks = optimize_from_predictions()
+    active_season = season or SeasonContext.current_season()
+    refresh_data(mode=mode, season=active_season)
+    train_from_processed(season=active_season)
+    predictions = predict_from_processed(season=active_season)
+    picks = optimize_from_predictions(season=active_season)
     return {"predictions": len(predictions), "picks": len(picks)}
 
 
@@ -164,7 +203,9 @@ def rebuild_processed_history() -> dict[str, int]:
         try:
             frame = read_historical_results(csv_path, season_code)
             # Prefer football-data.org official cache; fall back to openfootball
-            official_cache = RAW_DIR / "football-data-org" / f"{season_code.zfill(4)}_PL_matches.csv"
+            official_cache = (
+                RAW_DIR / "football-data-org" / f"{season_code.zfill(4)}_PL_matches.csv"
+            )
             openfootball_cache = RAW_DIR / "openfootball" / f"{season_code}_PL_matchdays.csv"
             if official_cache.exists():
                 import pandas as _pd
@@ -195,9 +236,9 @@ def rebuild_processed_history() -> dict[str, int]:
     return {"seasons": historical["season"].nunique(), "matches": len(historical)}
 
 
-def refresh_full_history() -> dict[str, str]:
+def refresh_full_history(season: SeasonContext | None = None) -> dict[str, str]:
     """Download all known football-data.co.uk EPL seasons, attach ClubElo and Understat xG."""
-    result = refresh_data(seasons=DEFAULT_SEASON_CODES, use_network=True)
+    result = refresh_data(seasons=DEFAULT_SEASON_CODES, mode="live", season=season)
     historical_path = PROCESSED_DIR / "historical_matches.csv"
     if historical_path.exists():
         historical = pd.read_csv(historical_path)
@@ -208,8 +249,13 @@ def refresh_full_history() -> dict[str, str]:
     return result
 
 
-def refresh_current_season(target_season: str = "2526", force: bool = True) -> dict[str, str]:
+def refresh_current_season(
+    season: SeasonContext | None = None,
+    force: bool = True,
+) -> dict[str, str]:
     """Refresh only the current season and merge it into cached full history."""
+    active_season = season or SeasonContext.current_season()
+    target_season = active_season.code
     ensure_data_dirs()
     historical_path = PROCESSED_DIR / "historical_matches.csv"
     existing = pd.read_csv(historical_path) if historical_path.exists() else pd.DataFrame()
@@ -224,11 +270,11 @@ def refresh_current_season(target_season: str = "2526", force: bool = True) -> d
     official_current = _get_cached_official_season(target_season, force=force)
     current = apply_official_gameweeks(current, official_current)
     if not existing.empty and "season" in existing:
-        prior_2526 = existing[existing["season"].astype(str).str.zfill(4) == target_season]
-        if not prior_2526.empty:
+        prior_current = existing[existing["season"].astype(str).str.zfill(4) == target_season]
+        if not prior_current.empty:
             elo_cols = ["match_id", "home_elo", "away_elo"]
             current = current.drop(columns=["home_elo", "away_elo"], errors="ignore").merge(
-                prior_2526[elo_cols], on="match_id", how="left"
+                prior_current[elo_cols], on="match_id", how="left"
             )
             current["home_elo"] = current["home_elo"].fillna(1500.0)
             current["away_elo"] = current["away_elo"].fillna(1500.0)
@@ -267,7 +313,7 @@ WINNER_BENCHMARKS: dict[str, int] = {
 
 def backtest_season(
     matches: pd.DataFrame,
-    target_season: str = "2526",
+    target_season: str | None = None,
     winner_points: int | None = None,
 ) -> dict[str, float | int]:
     """Train before the target season, predict completed target matches, and score picks.
@@ -275,6 +321,7 @@ def backtest_season(
     Features are computed over all seasons together so in-season stats accumulate
     correctly through the target season (no train/predict feature mismatch).
     """
+    target_season = target_season or SeasonContext.current_season().code
     completed = matches.dropna(subset=["home_goals", "away_goals"]).copy()
     completed["season_code"] = completed["season"].astype(str).str.zfill(4)
     train_matches = completed[completed["season_code"] != target_season]
@@ -287,7 +334,9 @@ def backtest_season(
     all_features = build_training_frame(completed)
     all_features["season_code"] = all_features["season"].astype(str).str.zfill(4)
     train_features = all_features[all_features["season_code"] != target_season]
-    target_features = all_features[all_features["season_code"] == target_season].reset_index(drop=True)
+    target_features = all_features[all_features["season_code"] == target_season].reset_index(
+        drop=True
+    )
 
     weights = season_decay_weights(train_features["season"], reference_season=target_season)
     model_run = train_model(train_features, sample_weight=weights)
@@ -295,9 +344,10 @@ def backtest_season(
     # Predict directly from pre-computed features (bypasses build_fixture_features).
     proba = model_run.estimator.predict_proba(target_features[FEATURE_COLUMNS])
     classes = list(model_run.estimator.classes_)
-    import numpy as np
     proba_df = pd.DataFrame(proba, columns=classes)
-    predictions = target_features[["match_id", "contest_week", "date", "home_team", "away_team"]].copy()
+    predictions = target_features[
+        ["match_id", "contest_week", "date", "home_team", "away_team"]
+    ].copy()
     predictions["p_home_win"] = proba_df.get("HOME_WIN", 0.0)
     predictions["p_draw"] = proba_df.get("DRAW", 0.0)
     predictions["p_away_win"] = proba_df.get("AWAY_WIN", 0.0)
@@ -332,7 +382,9 @@ def backtest_season(
     ensure_data_dirs()
     predictions.to_csv(EXPORT_DIR / f"{target_season}_backtest_probabilities.csv", index=False)
     scored_picks.to_csv(EXPORT_DIR / f"{target_season}_backtest_optimized_picks.csv", index=False)
-    resolved_winner = winner_points if winner_points is not None else WINNER_BENCHMARKS.get(target_season)
+    resolved_winner = (
+        winner_points if winner_points is not None else WINNER_BENCHMARKS.get(target_season)
+    )
     metrics: dict[str, float | int | str | None] = {
         "target_season": target_season,
         "training_matches": int(len(train_matches)),
@@ -365,7 +417,7 @@ def backtest_season(
     return metrics
 
 
-def backtest_from_processed(target_season: str = "2526") -> dict[str, float | int]:
+def backtest_from_processed(target_season: str | None = None) -> dict[str, float | int]:
     """Run a target-season backtest from processed historical data."""
     matches = pd.read_csv(PROCESSED_DIR / "historical_matches.csv")
     return backtest_season(matches, target_season)
@@ -426,7 +478,9 @@ def _upcoming_fixtures_from_official(official: pd.DataFrame) -> pd.DataFrame:
         return pd.DataFrame()
     frame = official.copy()
     frame = _attach_elo_cache(frame)
-    return frame[["match_id", "contest_week", "date", "home_team", "away_team", "home_elo", "away_elo"]]
+    return frame[
+        ["match_id", "contest_week", "date", "home_team", "away_team", "home_elo", "away_elo"]
+    ]
 
 
 def _fixtures_from_current_season(historical: pd.DataFrame, target_season: str) -> pd.DataFrame:
@@ -444,6 +498,23 @@ def _fixtures_from_current_season(historical: pd.DataFrame, target_season: str) 
             "away_elo",
         ]
     ]
+
+
+def _live_fixtures(historical: pd.DataFrame, season: SeasonContext) -> pd.DataFrame:
+    """Return active-season fixtures from live sources without sample fallback."""
+    fixtures = _fixtures_from_current_season(historical, season.code)
+    if not fixtures.empty:
+        return fixtures
+    api_key = os.getenv("FOOTBALL_DATA_ORG_API_KEY")
+    if not api_key:
+        raise LiveFixturesUnavailableError(season)
+    try:
+        fixtures = fetch_upcoming_fixtures(api_key=api_key)
+    except requests.RequestException as exc:
+        raise LiveFixturesUnavailableError(season) from exc
+    if fixtures.empty:
+        raise LiveFixturesUnavailableError(season)
+    return fixtures
 
 
 def _attach_elo_cache(matches: pd.DataFrame) -> pd.DataFrame:
@@ -495,14 +566,14 @@ def _get_cached_official_season(season_code: str, force: bool = False) -> pd.Dat
 
 
 def _compute_current_season_stats(
-    current_season: str = "2526",
+    season: SeasonContext,
 ) -> dict[str, list[int]]:
     """Compute cumulative in-season points/GD/matches for each team from processed history."""
     path = PROCESSED_DIR / "historical_matches.csv"
     if not path.exists():
         return {}
     matches = pd.read_csv(path).dropna(subset=["home_goals", "away_goals"])
-    matches = matches[matches["season"].astype(str).str.zfill(4) == current_season]
+    matches = matches[matches["season"].astype(str).str.zfill(4) == season.code]
     if matches.empty:
         return {}
     stats: dict[str, list[int]] = {}

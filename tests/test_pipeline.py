@@ -1,14 +1,31 @@
-import pandas as pd
+from pathlib import Path
 
-from epl_prediction_optimizer.pipeline import backtest_season, run_all
+import pandas as pd
+import requests
+
+from epl_prediction_optimizer.pipeline import backtest_season, refresh_data, run_all
 
 
 def test_run_all_sample_pipeline_creates_feasible_outputs(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
 
-    result = run_all()
+    result = run_all(mode="offline")
 
     assert result == {"predictions": 8, "picks": 4}
+
+
+def test_offline_refresh_never_calls_requests_even_with_api_key(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("FOOTBALL_DATA_ORG_API_KEY", "live-key-must-not-be-used")
+
+    def fail_if_called(*args, **kwargs):
+        raise AssertionError("offline refresh must not call requests.get")
+
+    monkeypatch.setattr(requests, "get", fail_if_called)
+
+    result = refresh_data(mode="offline")
+
+    assert Path(result["fixtures"]).exists()
 
 
 def test_backtest_season_trains_on_prior_seasons_and_scores_completed_target(tmp_path, monkeypatch):

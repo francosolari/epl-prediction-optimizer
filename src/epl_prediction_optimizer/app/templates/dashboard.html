@@ -104,13 +104,13 @@
     <header class="shell-header">
       <nav class="nav-rail" aria-label="Primary">
         <a class="active" href="/">Dashboard</a>
-        <a href="/challenge?season=2526">My Picks</a>
+        <a href="/challenge?season={{ season.code }}">My Picks</a>
         <a href="/backtest">Backtest</a>
         <a href="/model">Model</a>
         <a href="/data">Data</a>
       </nav>
       <div class="title-block">
-        <p class="eyebrow">2025–26 season</p>
+        <p class="eyebrow">{{ season.label }} season</p>
         <h1>EPL Selection Desk</h1>
       </div>
       <div class="system-state">
@@ -181,10 +181,10 @@
               <span>expected pts</span>
             </div>
           </div>
-          <a href="/challenge?season=2526&week={{ current_week }}">Record your actual pick for week {{ current_week }} →</a>
+          <a href="/challenge?season={{ season.code }}&week={{ current_week }}">Record your actual pick for week {{ current_week }} →</a>
         {% elif picks|length > 0 %}
           <div class="no-rec">
-            All optimized weeks are covered. <a href="/challenge?season=2526">Review submitted picks →</a>
+            All optimized weeks are covered. <a href="/challenge?season={{ season.code }}">Review submitted picks →</a>
           </div>
         {% else %}
           <div class="no-rec">
@@ -250,9 +250,9 @@
                 </tbody>
               </table>
             </div>
-            <a href="/challenge?season=2526">All picks and history →</a>
+            <a href="/challenge?season={{ season.code }}">All picks and history →</a>
           {% else %}
-            <p class="empty-copy">No picks recorded yet. <a href="/challenge?season=2526">Go to My Picks →</a></p>
+            <p class="empty-copy">No picks recorded yet. <a href="/challenge?season={{ season.code }}">Go to My Picks →</a></p>
           {% endif %}
         </div>
       </section>
