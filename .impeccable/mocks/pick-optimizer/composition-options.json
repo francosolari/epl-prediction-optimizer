@@ -1,0 +1,43 @@
+{
+  "title": "Choose the decision-desk composition",
+  "question": "Light and dark will both ship. Choose the information hierarchy that should govern both modes.",
+  "options": [
+    {
+      "id": "move-tree-first",
+      "label": "Move Tree First",
+      "kicker": "ORIGINAL DIRECTION",
+      "lineage": "Preparation Room",
+      "thesis": "The weekly candidate table leads, with future impact explained as a right-side continuation and a full-width season move tree.",
+      "palette": ["#F2EFE7", "#191B1F", "#2C5C9F", "#D79B35", "#A74B42"],
+      "materials": ["analysis paper", "engine notation", "ebonized frame"],
+      "viewport": "The weekly decision owns the center; a compact future-impact panel and branching season line complete the explanation.",
+      "risk": "The ensemble forecast chart would have to enter below the fold or replace some of the right-side explanation.",
+      "comp": ".impeccable/mocks/decision/preparation-room.webp"
+    },
+    {
+      "id": "balanced-horizon",
+      "label": "Balanced Horizon",
+      "kicker": "RECOMMENDED COMBINATION",
+      "lineage": "Preparation Room + Forecast Ensemble",
+      "thesis": "Candidate comparison and the forecast horizon share the first viewport, while the season move tree remains continuous below them.",
+      "palette": ["#F2EFE7", "#191B1F", "#2C5C9F", "#D79B35", "#A74B42"],
+      "materials": ["analysis paper", "forecast traces", "engine move tree"],
+      "viewport": "A roughly even split keeps this week’s choice actionable while showing the probabilistic future consequence beside it.",
+      "risk": "It carries the most simultaneous information and depends on disciplined responsive collapse on smaller screens.",
+      "comp": ".impeccable/mocks/pick-optimizer/ensemble-split-light.webp"
+    },
+    {
+      "id": "ensemble-focus",
+      "label": "Ensemble Focus",
+      "kicker": "DARK MODE PREVIEW",
+      "lineage": "Preparation Room + dominant forecast instrument",
+      "thesis": "A compact decision column leaves the season forecast as the dominant analytical instrument, with the move tree and impact audit below.",
+      "palette": ["#151718", "#ECE8DD", "#5E83C1", "#D79B35", "#B8685F"],
+      "materials": ["graphite drafting slate", "ensemble traces", "engine notation"],
+      "viewport": "The chart receives most of the horizontal field; the weekly choice remains fixed and actionable at left.",
+      "risk": "The chart can feel more authoritative than the underlying model warrants unless uncertainty and assumptions stay explicit.",
+      "comp": ".impeccable/mocks/pick-optimizer/ensemble-focus-dark.webp"
+    }
+  ],
+  "steer": true
+}
