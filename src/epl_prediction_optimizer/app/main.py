@@ -108,11 +108,21 @@ def create_app(
     )
 
     def decision_payload(selected_week: int | None = None) -> dict[str, object]:
-        predictions = db.get_json("predictions", [])
+        predictions = _active_season_predictions(db.get_json("predictions", []), active_season)
         actual_picks = db.list_actual_picks(active_season.code)
         candidates = (
             build_pick_candidates(pd.DataFrame(predictions)) if predictions else pd.DataFrame()
         )
+        if not candidates.empty:
+            committed_matches = {str(pick["match_id"]) for pick in actual_picks}
+            eligible = candidates.apply(
+                lambda row: (
+                    _candidate_kickoff(row.to_dict()) > datetime.now(UTC)
+                    or str(row["match_id"]) in committed_matches
+                ),
+                axis=1,
+            )
+            candidates = candidates[eligible].reset_index(drop=True)
         weeks = sorted(
             int(value) for value in candidates.get("contest_week", pd.Series(dtype=int)).unique()
         )
@@ -637,6 +647,23 @@ def _candidate_kickoff(candidate: dict[str, object]) -> datetime:
         return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
     date_value = datetime.fromisoformat(str(candidate["date"])).date()
     return datetime.combine(date_value, time(15, 0), tzinfo=UTC)
+
+
+def _active_season_predictions(
+    predictions: list[dict[str, object]],
+    season: SeasonContext,
+) -> list[dict[str, object]]:
+    """Reject cached predictions outside the active season's date window."""
+    if not predictions:
+        return []
+    frame = pd.DataFrame(predictions)
+    if "date" not in frame:
+        return []
+    dates = pd.to_datetime(frame["date"], errors="coerce", utc=True)
+    start = pd.Timestamp(year=season.start_year, month=7, day=1, tz="UTC")
+    end = pd.Timestamp(year=season.start_year + 1, month=7, day=1, tz="UTC")
+    current = frame[dates.ge(start) & dates.lt(end)]
+    return current.to_dict(orient="records")
 
 
 def _recent_picks_with_results(

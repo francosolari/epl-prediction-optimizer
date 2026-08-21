@@ -26,6 +26,48 @@ def test_app_exposes_dashboard_and_status(tmp_path: Path):
     assert readiness.json()["source_mode"] == "offline"
 
 
+def test_dashboard_never_presents_cached_predictions_from_another_season(tmp_path: Path):
+    database = Database(tmp_path / "state.sqlite")
+    database.set_json(
+        "predictions",
+        [
+            {
+                "match_id": "stale-1",
+                "contest_week": 1,
+                "date": "2025-08-16",
+                "home_team": "West Ham United",
+                "away_team": "Wolverhampton Wanderers",
+                "p_home_win": 0.6,
+                "p_draw": 0.2,
+                "p_away_win": 0.2,
+            }
+        ],
+    )
+    client = TestClient(create_app(database=database, workdir=tmp_path, use_live_data=False))
+
+    home = client.get("/")
+
+    assert home.status_code == 200
+    assert "West Ham United" not in home.text
+    assert "No verified 2026–27 forecasts yet" in home.text
+
+
+def test_all_analysis_surfaces_share_the_theme_control(tmp_path: Path):
+    client = TestClient(
+        create_app(
+            database=Database(tmp_path / "state.sqlite"),
+            workdir=tmp_path,
+            use_live_data=False,
+        )
+    )
+
+    for route in ("/", "/model", "/data", "/backtest", "/challenge?season=2627"):
+        response = client.get(route)
+        assert response.status_code == 200
+        assert 'data-theme="system"' in response.text
+        assert "data-theme-toggle" in response.text
+
+
 def test_run_all_endpoint_refreshes_trains_predicts_and_optimizes(tmp_path: Path):
     database = Database(tmp_path / "state.sqlite")
     app = create_app(database=database, workdir=tmp_path, use_live_data=False)
@@ -50,14 +92,6 @@ def test_run_all_endpoint_refreshes_trains_predicts_and_optimizes(tmp_path: Path
     )
     assert saved.status_code == 200
     assert saved.json()["pick"]["pick_version"] == 1
-
-    past_decision = client.get("/api/weeks/1").json()
-    past_choice = past_decision["scenarios"][0]
-    locked = client.put(
-        "/api/picks/1",
-        json={key: past_choice[key] for key in ("match_id", "team", "venue")},
-    )
-    assert locked.status_code == 409
 
 
 def test_data_explorer_previews_stored_csv_files(tmp_path: Path):

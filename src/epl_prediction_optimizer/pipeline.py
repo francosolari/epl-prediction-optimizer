@@ -260,16 +260,22 @@ def refresh_current_season(
     ensure_data_dirs()
     historical_path = PROCESSED_DIR / "historical_matches.csv"
     existing = pd.read_csv(historical_path) if historical_path.exists() else pd.DataFrame()
-    current = read_historical_results(
-        download_historical_results(
-            target_season,
-            RAW_DIR / "football-data" / f"{target_season}_E0.csv",
-            force=force,
-        ),
-        target_season,
-    )
     official_current = _get_cached_official_season(target_season, force=force)
-    current = apply_official_gameweeks(current, official_current)
+    _validate_official_season(official_current, active_season)
+    try:
+        current = read_historical_results(
+            download_historical_results(
+                target_season,
+                RAW_DIR / "football-data" / f"{target_season}_E0.csv",
+                force=force,
+            ),
+            target_season,
+        )
+        current = apply_official_gameweeks(current, official_current)
+    except (requests.RequestException, KeyError, ValueError, pd.errors.ParserError):
+        # football-data.co.uk can lag a new season or return an HTML redirect.
+        # The season-scoped official API remains the source of truth in that case.
+        current = official_current.copy()
     if not existing.empty and "season" in existing:
         prior_current = existing[existing["season"].astype(str).str.zfill(4) == target_season]
         if not prior_current.empty:
@@ -302,6 +308,36 @@ def refresh_current_season(
         "mode": "current-season",
         "gameweek_source": "football-data.org" if not official_current.empty else "date-bucket",
     }
+
+
+def _validate_official_season(
+    matches: pd.DataFrame,
+    season: SeasonContext,
+) -> None:
+    """Fail closed unless the official response is a complete active EPL season."""
+    required = {
+        "season",
+        "match_id",
+        "contest_week",
+        "date",
+        "home_team",
+        "away_team",
+    }
+    if matches.empty or not required.issubset(matches.columns):
+        raise LiveFixturesUnavailableError(season)
+    source_seasons = set(matches["season"].astype(str).str.zfill(4))
+    teams = set(matches["home_team"]).union(matches["away_team"])
+    dates = pd.to_datetime(matches["date"], errors="coerce")
+    start = pd.Timestamp(year=season.start_year, month=7, day=1)
+    end = pd.Timestamp(year=season.start_year + 1, month=7, day=1)
+    if (
+        source_seasons != {season.code}
+        or len(matches) != 380
+        or len(teams) != 20
+        or dates.isna().any()
+        or not dates.between(start, end, inclusive="left").all()
+    ):
+        raise LiveFixturesUnavailableError(season)
 
 
 WINNER_BENCHMARKS: dict[str, int] = {
@@ -510,26 +546,34 @@ def _upcoming_fixtures_from_official(official: pd.DataFrame) -> pd.DataFrame:
         return pd.DataFrame()
     frame = official.copy()
     frame = _attach_elo_cache(frame)
-    return frame[
-        ["match_id", "contest_week", "date", "home_team", "away_team", "home_elo", "away_elo"]
+    columns = [
+        "match_id",
+        "contest_week",
+        "date",
+        "kickoff_utc",
+        "home_team",
+        "away_team",
+        "home_elo",
+        "away_elo",
     ]
+    return frame[[column for column in columns if column in frame]]
 
 
 def _fixtures_from_current_season(historical: pd.DataFrame, target_season: str) -> pd.DataFrame:
     target = historical[historical["season"] == target_season].copy()
     if target.empty:
         return pd.DataFrame()
-    return target[
-        [
-            "match_id",
-            "contest_week",
-            "date",
-            "home_team",
-            "away_team",
-            "home_elo",
-            "away_elo",
-        ]
+    columns = [
+        "match_id",
+        "contest_week",
+        "date",
+        "kickoff_utc",
+        "home_team",
+        "away_team",
+        "home_elo",
+        "away_elo",
     ]
+    return target[[column for column in columns if column in target]]
 
 
 def _live_fixtures(historical: pd.DataFrame, season: SeasonContext) -> pd.DataFrame:

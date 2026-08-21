@@ -1,10 +1,11 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="system">
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Model · EPL Prediction Optimizer</title>
     <link rel="stylesheet" href="/static/styles.css">
+    <script defer src="/static/decision.js"></script>
     <style>
       .stage-diagram {
         display: grid;
@@ -62,6 +63,7 @@
           <span>no model</span>
           <strong>—</strong>
         {% endif %}
+        <button class="theme-toggle" type="button" data-theme-toggle aria-label="Change color theme">System</button>
       </div>
     </header>
 

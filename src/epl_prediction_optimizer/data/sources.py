@@ -57,6 +57,7 @@ TEAM_NAME_MAP = {
     "Coventry": "Coventry City",
     "Derby": "Derby County",
     "Hull": "Hull City",
+    "Hull City AFC": "Hull City",
     "Ipswich": "Ipswich Town",
     "Norwich": "Norwich City",
     "Oldham": "Oldham Athletic",
@@ -362,7 +363,7 @@ def sample_upcoming_fixtures() -> pd.DataFrame:
     """Return deterministic fixtures for offline demos and tests."""
     teams = ["Arsenal", "Everton", "Chelsea", "Fulham"]
     rows = []
-    first_saturday = date(2026, 8, 15)
+    first_saturday = date(2026, 8, 22)
     for week in range(1, 5):
         for match_index in range(0, len(teams), 2):
             home = teams[(match_index + week) % len(teams)]

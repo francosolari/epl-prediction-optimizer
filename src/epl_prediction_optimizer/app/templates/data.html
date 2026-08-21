@@ -1,10 +1,11 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="system">
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Stored Input Data · EPL Prediction Optimizer</title>
     <link rel="stylesheet" href="/static/styles.css">
+    <script defer src="/static/decision.js"></script>
   </head>
   <body>
     <header class="shell-header">
@@ -22,6 +23,7 @@
       <div class="system-state">
         <span>CSV files</span>
         <strong>{{ datasets|length }}</strong>
+        <button class="theme-toggle" type="button" data-theme-toggle aria-label="Change color theme">System</button>
       </div>
     </header>
     <main class="workspace">
