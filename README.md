@@ -51,6 +51,20 @@ uv run eplpo optimize
 uv run eplpo odds                  # prices only
 ```
 
+### Submitting the pick
+
+Committing a pick shows the submission email with **Send in Gmail** and a
+plain `mailto:` fallback.
+
+With more than one Google account signed in, Gmail composes from whichever it
+treats as default, which is not predictable. Set **Sends from** under the
+buttons to your contest address and the link targets that account directly
+(`mail.google.com/mail/u/<address>/…`). Until it is set the panel says so.
+Check the From line in the compose window before sending either way.
+
+`CONTEST_EMAIL`, `CONTEST_ENTRANT`, and `CONTEST_GMAIL_ACCOUNT` override the
+recipient, the name in the subject, and the sending account.
+
 ### Scorecard and the field
 
 **Scorecard** (nav 03) is the grid view: every committed round with the result,

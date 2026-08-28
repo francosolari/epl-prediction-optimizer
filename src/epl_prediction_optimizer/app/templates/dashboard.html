@@ -84,6 +84,19 @@
               <a class="primary-action" href="{{ decision.submission.gmail_url }}" target="_blank" rel="noopener">Send in Gmail</a>
               <a class="secondary-action" href="{{ decision.submission.mailto_url }}">Use default mail app</a>
             </p>
+            <form class="sender-form" method="post" action="/actions/gmail-account">
+              <input type="hidden" name="week" value="{{ decision.selected_week }}">
+              <label>
+                <span>Sends from</span>
+                <input type="email" name="account" value="{{ decision.submission.account }}" placeholder="your.name@gmail.com">
+              </label>
+              <button type="submit">Save</button>
+              {% if not decision.submission.account %}
+              <small class="sender-warning">Not set — Gmail will use whichever account your browser has signed in first. Set it to be sure.</small>
+              {% else %}
+              <small>Compose opens in <strong>{{ decision.submission.account }}</strong>. Check the From line before sending.</small>
+              {% endif %}
+            </form>
           </div>
           {% endif %}
           {% if decision.verdict %}

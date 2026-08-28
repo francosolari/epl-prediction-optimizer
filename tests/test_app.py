@@ -335,3 +335,24 @@ def test_committing_a_pick_offers_the_submission_email(tmp_path: Path):
     assert "premierPicksCompetition" in page
     body = f"I pick {choice['team']} to beat {choice['opponent']}"
     assert body in page or body.replace(" ", "+") in page
+
+
+def test_the_sending_google_account_can_be_set_and_pins_the_compose_link(tmp_path: Path):
+    database = Database(tmp_path / "state.sqlite")
+    client = TestClient(create_app(database=database, workdir=tmp_path, use_live_data=False))
+    client.post("/api/run-all")
+    decision = client.get("/api/weeks/2").json()
+    choice = decision["scenarios"][0]
+    client.put("/api/picks/2", json={k: choice[k] for k in ("match_id", "team", "venue")})
+
+    before = client.get("/?week=2").text
+    assert "Not set" in before
+
+    client.post(
+        "/actions/gmail-account",
+        data={"account": "franco@gmail.com", "week": "2"},
+        follow_redirects=True,
+    )
+    after = client.get("/?week=2").text
+    assert "mail/u/franco%40gmail.com/" in after
+    assert "Not set" not in after

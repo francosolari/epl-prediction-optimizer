@@ -209,7 +209,7 @@ def create_app(
             "scenarios": scenarios,
             "verdict": decision_verdict(scenarios, committed),
             "committed": committed,
-            "submission": _submission_email(committed, scenarios),
+            "submission": _submission_email(committed, scenarios, _gmail_account(db)),
             "entrant": entrant_name(),
         }
 
@@ -315,6 +315,12 @@ def create_app(
             },
         )
         return RedirectResponse(f"/?week={contest_week}", status_code=303)
+
+    @app.post("/actions/gmail-account", response_class=RedirectResponse)
+    def set_gmail_account(account: str = Form(""), week: str = Form("")) -> RedirectResponse:
+        db.set_json("gmail_account", {"address": account.strip()})
+        target = f"/?week={week}" if week else "/"
+        return RedirectResponse(target, status_code=303)
 
     @app.get("/scorecard", response_class=HTMLResponse)
     def scorecard(
@@ -923,6 +929,7 @@ def build_scorecard(
                     int(pick["contest_week"]),
                     pick["team"],
                     result.get("opponent_for", {}).get(pick["team"]) or "opponent",
+                    account=_gmail_account(database) or None,
                 ),
             }
         )
@@ -1286,9 +1293,15 @@ def _reference_field(database: Database, season: str) -> list[int]:
     return []
 
 
+def _gmail_account(database: Database) -> str:
+    """Google account the compose links should open in, if the user set one."""
+    return str((database.get_json("gmail_account", {}) or {}).get("address", "")).strip()
+
+
 def _submission_email(
     committed: dict | None,
     scenarios: list[dict],
+    account: str = "",
 ) -> dict[str, str] | None:
     """Compose the organiser email once a pick for the round is committed.
 
@@ -1309,5 +1322,8 @@ def _submission_email(
     if match is None:
         return None
     return compose_pick_email(
-        int(committed["contest_week"]), committed["team"], match["opponent"]
+        int(committed["contest_week"]),
+        committed["team"],
+        match["opponent"],
+        account=account or None,
     )
