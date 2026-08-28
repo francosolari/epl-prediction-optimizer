@@ -8,8 +8,10 @@ from contextlib import asynccontextmanager, chdir, suppress
 from datetime import UTC, datetime, time
 from pathlib import Path
 from typing import Literal
+from urllib.parse import quote
 
 import pandas as pd
+import requests
 from fastapi import FastAPI, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
@@ -20,10 +22,19 @@ from epl_prediction_optimizer.challenge import (
     score_manual_pick,
     summarize_challenge,
 )
+from epl_prediction_optimizer.config.contest import compose_pick_email, entrant_name
 from epl_prediction_optimizer.config.season import SeasonContext
+from epl_prediction_optimizer.data.league import (
+    ContestSheetError,
+    fetch_contest_sheet,
+    parse_contest_sheet,
+)
 from epl_prediction_optimizer.optimizer.candidates import build_pick_candidates
 from epl_prediction_optimizer.optimizer.scenarios import build_scenarios
+from epl_prediction_optimizer.optimizer.tournament import win_probability_against_field
+from epl_prediction_optimizer.optimizer.verdict import decision_verdict
 from epl_prediction_optimizer.pipeline import (
+    MARKET_BLEND_WEIGHT,
     WINNER_BENCHMARKS,
     backtest_from_processed,
     optimize_from_predictions,
@@ -41,12 +52,33 @@ def _utc_now() -> str:
     return datetime.now(UTC).isoformat()
 
 
+def _asset_version() -> str:
+    """Fingerprint the static bundle by its most recently modified file."""
+    static_dir = PACKAGE_ROOT / "static"
+    if not static_dir.exists():
+        return "0"
+    newest = max(
+        (path.stat().st_mtime for path in static_dir.rglob("*") if path.is_file()),
+        default=0.0,
+    )
+    return str(int(newest))
+
+
 def create_app(
     database: Database | None = None,
     workdir: Path | str | None = None,
     use_live_data: bool = True,
+    auto_refresh: bool = False,
 ) -> FastAPI:
-    """Create a FastAPI app using the provided or default SQLite database."""
+    """Create a FastAPI app using the provided or default SQLite database.
+
+    ``auto_refresh`` re-runs the whole pipeline every 30 minutes in the
+    background. It is off by default: a long-running server would otherwise
+    rewrite the published forecasts and picks on its own schedule, including
+    over a plan the user had just generated, and a server left running across a
+    code change would keep republishing from the old code. Refresh is a
+    deliberate action taken from the UI or the CLI.
+    """
     db = database or Database()
     runtime_dir = Path(workdir or ".").resolve()
     runtime_dir.mkdir(parents=True, exist_ok=True)
@@ -91,7 +123,7 @@ def create_app(
                     )
                 await asyncio.sleep(30 * 60)
 
-        if use_live_data:
+        if use_live_data and auto_refresh:
             task = asyncio.create_task(refresh_loop())
         yield
         if task:
@@ -101,6 +133,10 @@ def create_app(
 
     app = FastAPI(title="EPL Prediction Optimizer", lifespan=lifespan)
     templates = Jinja2Templates(directory=str(PACKAGE_ROOT / "templates"))
+    # Browsers cache /static aggressively, so a CSS change can leave a running
+    # page styled by the previous version with no sign anything is wrong.
+    # Stamping the newest asset mtime onto every link makes that impossible.
+    templates.env.globals["asset_version"] = _asset_version()
     app.mount(
         "/static",
         StaticFiles(directory=str(PACKAGE_ROOT / "static")),
@@ -140,7 +176,22 @@ def create_app(
         week = (
             selected_week if selected_week in weeks else next_open or (weeks[-1] if weeks else None)
         )
-        scenarios = build_scenarios(candidates, week, actual_picks) if week is not None else []
+        banked = sum(
+            int(pick["actual_points"])
+            for pick in actual_picks
+            if pick.get("actual_points") is not None
+        )
+        scenarios = (
+            build_scenarios(
+                candidates,
+                week,
+                actual_picks,
+                field_totals=_reference_field(db, active_season.code),
+                points_banked=banked,
+            )
+            if week is not None
+            else []
+        )
         committed = next((p for p in actual_picks if int(p["contest_week"]) == week), None)
         for item in scenarios:
             item["selected"] = bool(
@@ -156,7 +207,10 @@ def create_app(
             "selected_week": week,
             "next_open_week": next_open,
             "scenarios": scenarios,
+            "verdict": decision_verdict(scenarios),
             "committed": committed,
+            "submission": _submission_email(committed, scenarios),
+            "entrant": entrant_name(),
         }
 
     @app.get("/", response_class=HTMLResponse)
@@ -174,6 +228,9 @@ def create_app(
             request,
             "dashboard.html",
             {
+                "readiness": build_readiness(
+                    db, runtime_dir, active_season, MARKET_BLEND_WEIGHT
+                ),
                 "status": db.get_json("status", {"status": "needs_refresh"}),
                 "predictions": decision["predictions"],
                 "picks": picks,
@@ -258,6 +315,38 @@ def create_app(
             },
         )
         return RedirectResponse(f"/?week={contest_week}", status_code=303)
+
+    @app.get("/scorecard", response_class=HTMLResponse)
+    def scorecard(
+        request: Request,
+        season: str | None = None,
+        entrant: str | None = None,
+        error: str | None = None,
+        imported: str | None = None,
+    ) -> HTMLResponse:
+        selected_season = season or active_season.code
+        context = build_scorecard(db, runtime_dir, selected_season, entrant)
+        context["import_error"] = error
+        context["imported"] = _imported_banner(imported)
+        return templates.TemplateResponse(request, "scorecard.html", context)
+
+    @app.post("/actions/import-league", response_class=RedirectResponse)
+    def import_league(url: str = Form(...), season: str = Form(...)) -> RedirectResponse:
+        try:
+            text = fetch_contest_sheet(url)
+            entrants, picks = parse_contest_sheet(text, season)
+            db.replace_league_data(
+                season, entrants.to_dict(orient="records"), picks.to_dict(orient="records")
+            )
+        except (ContestSheetError, requests.RequestException) as exc:
+            return RedirectResponse(
+                f"/scorecard?season={season}&error={quote(str(exc))}", status_code=303
+            )
+        db.set_json("league_sheet_url", {"season": season, "url": url})
+        banner = f"{season}:{len(entrants)}:{len(picks)}"
+        return RedirectResponse(
+            f"/scorecard?season={season}&imported={quote(banner)}", status_code=303
+        )
 
     @app.get("/model", response_class=HTMLResponse)
     def model_view(request: Request) -> HTMLResponse:
@@ -799,3 +888,421 @@ def _filter_challenge_rows(
 
 
 app = create_app()
+
+
+def build_scorecard(
+    database: Database,
+    runtime_dir: Path,
+    season: str,
+    entrant: str | None = None,
+) -> dict[str, object]:
+    """Assemble the scorecard: my scored rounds, the field, and where I sit in it."""
+    picks = database.list_actual_picks(season)
+    results = _match_results(runtime_dir)
+    probabilities = _pick_probabilities(runtime_dir)
+
+    my_picks: list[dict[str, object]] = []
+    running = 0
+    for pick in sorted(picks, key=lambda row: int(row["contest_week"])):
+        points = pick.get("actual_points")
+        if points is not None:
+            running += int(points)
+        result = results.get(str(pick.get("match_id", "")), {})
+        my_picks.append(
+            {
+                "contest_week": int(pick["contest_week"]),
+                "team": pick["team"],
+                "venue": pick["venue"],
+                "opponent": result.get("opponent_for", {}).get(pick["team"]),
+                "result_label": result.get("label"),
+                "p_win": probabilities.get((int(pick["contest_week"]), pick["team"])),
+                "points": points,
+                "running_total": running,
+                "state_class": _pick_state_class(points),
+            }
+        )
+
+    scored = [pick for pick in picks if pick.get("actual_points") is not None]
+    summary = {
+        "points": sum(int(pick["actual_points"]) for pick in scored),
+        "scored": len(scored),
+        "submitted": len(picks),
+        "pending": len(picks) - len(scored),
+        "wins": sum(1 for pick in scored if pick["actual_points"] == 3),
+        "draws": sum(1 for pick in scored if pick["actual_points"] == 1),
+        "losses": sum(1 for pick in scored if pick["actual_points"] == 0),
+    }
+    summary["avg_points"] = summary["points"] / len(scored) if scored else 0.0
+
+    league_url = (database.get_json("league_sheet_url", {}) or {}).get("url")
+    entrants, standing = _league_standings(database, season, summary["points"])
+    league_picks = database.list_league_picks(season, entrant) if entrant else []
+
+    return {
+        "season": season,
+        "summary": summary,
+        "my_picks": my_picks,
+        "entrants": entrants,
+        "standing": standing,
+        "selected_entrant": entrant,
+        "entrant_picks": league_picks,
+        "popular": _field_consensus(database, season, my_picks),
+        "chances": _win_chances(database, season, runtime_dir, summary["points"]),
+        "league_url": league_url,
+    }
+
+
+def _pick_state_class(points: object) -> str:
+    if points is None:
+        return ""
+    return {3: "is-win", 1: "is-draw", 0: "is-loss"}.get(int(points), "")
+
+
+def _match_results(runtime_dir: Path) -> dict[str, dict]:
+    """Final scores by match id, with a readable label and each side's opponent."""
+    path = runtime_dir / "data" / "processed" / "historical_matches.csv"
+    if not path.exists():
+        return {}
+    frame = pd.read_csv(path).dropna(subset=["home_goals", "away_goals"])
+    results: dict[str, dict] = {}
+    for match in frame.itertuples(index=False):
+        home, away = int(match.home_goals), int(match.away_goals)
+        if home == away:
+            label = f"{home}-{away} draw"
+        elif home > away:
+            label = f"{match.home_team} {home}-{away}"
+        else:
+            label = f"{match.away_team} {away}-{home}"
+        results[str(match.match_id)] = {
+            "label": label,
+            "opponent_for": {match.home_team: match.away_team, match.away_team: match.home_team},
+        }
+    return results
+
+
+def _pick_probabilities(runtime_dir: Path) -> dict[tuple[int, str], float]:
+    """Modelled win probability per (round, team) from the published forecasts."""
+    path = runtime_dir / "data" / "exports" / "fixture_probabilities.csv"
+    if not path.exists():
+        return {}
+    frame = pd.read_csv(path)
+    mapping: dict[tuple[int, str], float] = {}
+    for row in frame.itertuples(index=False):
+        week = int(row.contest_week)
+        mapping[(week, row.home_team)] = float(row.p_home_win)
+        mapping[(week, row.away_team)] = float(row.p_away_win)
+    return mapping
+
+
+def _league_standings(
+    database: Database,
+    season: str,
+    my_points: int,
+) -> tuple[list[dict], dict | None]:
+    """Imported entrants with round counts, plus where the user sits."""
+    entrants = database.list_league_entrants(season)
+    if not entrants:
+        return [], None
+    picks = database.list_league_picks(season)
+    rounds: dict[str, int] = {}
+    for pick in picks:
+        rounds[pick["entrant"]] = rounds.get(pick["entrant"], 0) + 1
+
+    rows = []
+    for item in entrants:
+        rows.append({**item, "rounds": rounds.get(item["entrant"], 0), "is_me": False})
+    ahead = sum(1 for row in rows if (row["points"] or 0) > my_points)
+    return rows, {"place": ahead + 1, "entrants": len(rows), "points": my_points}
+
+
+def _field_consensus(database: Database, season: str, my_picks: list[dict]) -> list[dict]:
+    """The most-taken team per round, and what the user took instead."""
+    picks = database.list_league_picks(season)
+    if not picks:
+        return []
+    frame = pd.DataFrame(picks)
+    mine = {row["contest_week"]: row["team"] for row in my_picks}
+    rows = []
+    for week, group in frame.groupby("contest_week"):
+        counts = group["team"].value_counts()
+        top = counts.index[0]
+        taken = group[group["team"] == top]
+        rows.append(
+            {
+                "contest_week": int(week),
+                "team": top,
+                "share": float(counts.iloc[0] / len(group)),
+                "avg_points": (
+                    float(taken["points"].mean()) if taken["points"].notna().any() else 0.0
+                ),
+                "mine": mine.get(int(week)),
+            }
+        )
+    return sorted(rows, key=lambda row: row["contest_week"])
+
+
+def _win_chances(
+    database: Database,
+    season: str,
+    runtime_dir: Path,
+    points_so_far: int,
+) -> dict | None:
+    """Chance of finishing top, using a completed season's field as the comparison.
+
+    The current season has no final totals yet, so the field is taken from the
+    most recent completed import. It is an estimate of the standard this
+    contest is won at, not a reading of this season's rivals.
+    """
+    plan_path = runtime_dir / "data" / "exports" / "optimized_picks.csv"
+    if not plan_path.exists():
+        return None
+    field_season = next(
+        (
+            code
+            for code in sorted(_imported_seasons(database), reverse=True)
+            if code != season
+        ),
+        None,
+    )
+    if field_season is None:
+        return None
+    totals = [
+        entrant["points"]
+        for entrant in database.list_league_entrants(field_season)
+        if entrant["points"] is not None
+    ]
+    if not totals:
+        return None
+    plan = pd.read_csv(plan_path)
+    remaining = plan[~plan["contest_week"].isin({row for row in _scored_weeks(database, season)})]
+    chances = win_probability_against_field(remaining, totals, points_so_far=points_so_far)
+    return {**chances, "field_season": field_season}
+
+
+def _imported_seasons(database: Database) -> list[str]:
+    seasons: set[str] = set()
+    for code in ("2223", "2324", "2425", "2526", "2627"):
+        if database.list_league_entrants(code):
+            seasons.add(code)
+    return sorted(seasons)
+
+
+def _scored_weeks(database: Database, season: str) -> set[int]:
+    return {
+        int(pick["contest_week"])
+        for pick in database.list_actual_picks(season)
+        if pick.get("actual_points") is not None
+    }
+
+
+def _imported_banner(value: str | None) -> dict[str, object] | None:
+    """Decode the post-import confirmation carried through the redirect."""
+    if not value:
+        return None
+    parts = value.split(":")
+    if len(parts) != 3:
+        return None
+    season, entrants, picks = parts
+    if not (entrants.isdigit() and picks.isdigit()):
+        return None
+    return {"season": season, "entrants": int(entrants), "picks": int(picks)}
+
+
+def build_readiness(
+    database: Database,
+    runtime_dir: Path,
+    season: SeasonContext,
+    market_weight: float,
+) -> dict[str, object]:
+    """Provenance for the pick about to be made: what fed it, and when.
+
+    A refresh that silently used stale prices or an un-retrained model looks
+    exactly like one that did not, so every claim here is read back off the
+    artifact that would actually be used rather than from a status flag.
+    """
+    exports = runtime_dir / "data" / "exports"
+    processed = runtime_dir / "data" / "processed"
+    artifacts = runtime_dir / "data" / "artifacts"
+
+    metrics = _read_json(artifacts / "metrics.json")
+    forecasts = _read_csv(exports / "fixture_probabilities.csv")
+    fixtures = _read_csv(processed / "fixtures.csv")
+    results = _read_csv(processed / "historical_matches.csv")
+
+    played = pd.DataFrame()
+    if not results.empty and "season" in results:
+        played = results[results["season"].astype(str).str.zfill(4) == season.code]
+        played = played.dropna(subset=["home_goals", "away_goals"])
+
+    round_number, priced, total = _next_round_pricing(fixtures, forecasts)
+    entrants = database.list_league_entrants(season.code)
+
+    checks = [
+        {
+            "label": "Live data pulled",
+            "value": _file_age(processed / "fixtures.csv"),
+            "ok": _is_fresh(processed / "fixtures.csv"),
+            "detail": f"{len(fixtures)} fixtures, {len(played)} results recorded",
+        },
+        {
+            "label": "Model retrained",
+            "value": _timestamp_age(metrics.get("trained_at")),
+            "ok": _trained_after(metrics.get("trained_at"), processed / "fixtures.csv"),
+            "detail": f"{int(metrics.get('rows', 0)):,} matches",
+        },
+        {
+            "label": "Forecasts published",
+            "value": _file_age(exports / "fixture_probabilities.csv"),
+            "ok": _is_fresh(exports / "fixture_probabilities.csv"),
+            "detail": f"{len(forecasts)} fixtures priced by the model",
+        },
+        {
+            "label": f"Round {round_number} market prices" if round_number else "Market prices",
+            "value": f"{priced}/{total} fixtures" if total else "no round pending",
+            "ok": bool(total) and priced == total,
+            "detail": (
+                f"blended at weight {market_weight:g}"
+                if priced
+                else "the market has not opened this round yet"
+            ),
+        },
+        {
+            "label": "Contest sheet",
+            "value": f"{len(entrants)} entrants" if entrants else "not imported",
+            "ok": bool(entrants),
+            "detail": f"season {season.code}",
+        },
+    ]
+    return {"checks": checks, "all_ok": all(check["ok"] for check in checks)}
+
+
+def _read_json(path: Path) -> dict:
+    if not path.exists():
+        return {}
+    import json
+
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except ValueError:
+        return {}
+
+
+def _read_csv(path: Path) -> pd.DataFrame:
+    if not path.exists():
+        return pd.DataFrame()
+    try:
+        return pd.read_csv(path)
+    except (ValueError, OSError):
+        return pd.DataFrame()
+
+
+def _next_round_pricing(
+    fixtures: pd.DataFrame,
+    forecasts: pd.DataFrame,
+) -> tuple[int | None, int, int]:
+    """How many of the next weekend round's fixtures carry a market price."""
+    if fixtures.empty or forecasts.empty or "market_weight" not in forecasts:
+        return None, 0, 0
+    frame = fixtures.copy()
+    frame["date"] = pd.to_datetime(frame["date"], errors="coerce")
+    today = pd.Timestamp(datetime.now(UTC)).tz_localize(None).normalize()
+    weekend = frame[(frame["date"] >= today) & (frame["date"].dt.dayofweek.isin([5, 6]))]
+    if weekend.empty:
+        return None, 0, 0
+    round_number = int(weekend["contest_week"].min())
+    ids = set(weekend[weekend["contest_week"] == round_number]["match_id"].astype(str))
+    scored = forecasts[forecasts["match_id"].astype(str).isin(ids)]
+    priced = int((pd.to_numeric(scored["market_weight"], errors="coerce") > 0).sum())
+    return round_number, priced, len(ids)
+
+
+def _file_age(path: Path) -> str:
+    if not path.exists():
+        return "missing"
+    return _describe_age(datetime.fromtimestamp(path.stat().st_mtime, tz=UTC))
+
+
+def _timestamp_age(value: object) -> str:
+    if not value:
+        return "never"
+    try:
+        return _describe_age(datetime.fromisoformat(str(value)))
+    except ValueError:
+        return str(value)
+
+
+def _describe_age(moment: datetime) -> str:
+    minutes = (datetime.now(UTC) - moment).total_seconds() / 60
+    if minutes < 1:
+        return "just now"
+    if minutes < 60:
+        return f"{int(minutes)} min ago"
+    if minutes < 60 * 24:
+        return f"{int(minutes // 60)}h ago"
+    return f"{int(minutes // (60 * 24))}d ago"
+
+
+def _is_fresh(path: Path, hours: int = 24) -> bool:
+    """Artifacts older than a day predate this weekend's team news and prices."""
+    if not path.exists():
+        return False
+    age = datetime.now(UTC) - datetime.fromtimestamp(path.stat().st_mtime, tz=UTC)
+    return age.total_seconds() < hours * 3600
+
+
+def _trained_after(trained_at: object, data_path: Path) -> bool:
+    """The model must be newer than the data, or it never saw the latest results."""
+    if not trained_at or not data_path.exists():
+        return False
+    try:
+        trained = datetime.fromisoformat(str(trained_at))
+    except ValueError:
+        return False
+    refreshed = datetime.fromtimestamp(data_path.stat().st_mtime, tz=UTC)
+    return trained >= refreshed and _is_fresh(data_path)
+
+
+def _reference_field(database: Database, season: str) -> list[int]:
+    """Finishing totals from the most recent completed field, for scoring plans.
+
+    The season in progress has no final totals, so the closest completed import
+    stands in as the standard this contest is won at.
+    """
+    for code in sorted(_imported_seasons(database), reverse=True):
+        if code == season:
+            continue
+        totals = [
+            entrant["points"]
+            for entrant in database.list_league_entrants(code)
+            if entrant["points"] is not None
+        ]
+        if totals:
+            return totals
+    return []
+
+
+def _submission_email(
+    committed: dict | None,
+    scenarios: list[dict],
+) -> dict[str, str] | None:
+    """Compose the organiser email once a pick for the round is committed.
+
+    The opponent is not stored on the pick, so it is read back from the
+    scenario the pick corresponds to.
+    """
+    if not committed:
+        return None
+    match = next(
+        (
+            item
+            for item in scenarios
+            if str(item.get("match_id")) == str(committed.get("match_id"))
+            and item.get("team") == committed.get("team")
+        ),
+        None,
+    )
+    if match is None:
+        return None
+    return compose_pick_email(
+        int(committed["contest_week"]), committed["team"], match["opponent"]
+    )

@@ -7,6 +7,8 @@ build_fixture_features is used at prediction time with optional current-season c
 
 from __future__ import annotations
 
+import math
+
 import pandas as pd
 
 OUTCOME_HOME = "HOME_WIN"
@@ -47,12 +49,37 @@ FEATURE_COLUMNS = [
     "h2h_home_win_rate",
     "h2h_draw_rate",
     "h2h_meetings",
-    # --- Candidates for future inclusion (validated via ablation_test.py) ---
-    # "home_shots_ot_form", "away_shots_ot_form",   # +shots: 160 combined (vs 163 baseline)
-    # "home_xg_form", "away_xg_form",               # +xG: 156 combined
-    # "market_prob_home", "market_prob_draw", "market_prob_away",  # +odds: 154 combined
-    # Enable only when 3+ completed backtest seasons confirm improvement
+    # --- Candidates for future inclusion ---
+    # "home_shots_ot_form", "away_shots_ot_form",
+    # "home_xg_form", "away_xg_form",
+    # Judge these on log loss / RPS over several held-out seasons, not on
+    # combined contest points — 38 picks a season cannot separate signal from
+    # luck. See docs/model-evaluation.md.
+    #
+    # Market prices deliberately stay out of this list. Odds exist for the next
+    # round or two, never for the whole remaining season, so a model fitted on
+    # them would describe near and far fixtures on different terms and make the
+    # season plan incoherent. They are pooled into the output instead, per
+    # fixture and only where a price exists — see ml/market.py.
 ]
+
+
+# Fallback values for features that cannot be computed from history. These match
+# the cold-start values the accumulator itself emits, so a fixture with no prior
+# record looks the same to the model in training and in production.
+NEUTRAL_FEATURE_DEFAULTS: dict[str, float] = {
+    "home_draw_tendency": 0.25,
+    "away_draw_tendency": 0.25,
+    # Optional signals stay NaN when unavailable; the gradient booster treats
+    # missing natively rather than reading a zero as a real observation.
+    "home_shots_ot_form": float("nan"),
+    "away_shots_ot_form": float("nan"),
+    "home_xg_form": float("nan"),
+    "away_xg_form": float("nan"),
+    "market_prob_home": float("nan"),
+    "market_prob_draw": float("nan"),
+    "market_prob_away": float("nan"),
+}
 
 
 def normalize_match_frame(matches: pd.DataFrame) -> pd.DataFrame:
@@ -79,8 +106,6 @@ def build_training_frame(matches: pd.DataFrame, rolling_window: int = 5) -> pd.D
     - Rolling xG (5-game) per team — NaN when unavailable
     - Betting market implied probabilities from B365 odds
     """
-    import math
-
     frame = normalize_match_frame(matches)
     has_season = "season" in frame.columns
     has_match_id = "match_id" in frame.columns
@@ -200,6 +225,11 @@ def build_training_frame(matches: pd.DataFrame, rolling_window: int = 5) -> pd.D
 
         rows.append(row)
 
+        if row["outcome"] is None:
+            # Unplayed fixture: its features are emitted from state as it stands,
+            # but it contributes nothing back to form, table, or head-to-head.
+            continue
+
         home_pts = _points_for(match.home_goals, match.away_goals)
         away_pts = _points_for(match.away_goals, match.home_goals)
         home_gd = int(match.home_goals) - int(match.away_goals)
@@ -224,39 +254,57 @@ def build_training_frame(matches: pd.DataFrame, rolling_window: int = 5) -> pd.D
         h2h_history.setdefault(h2h_key, []).append(outcome)
 
         # Update rolling shots on target history (store team's own shots as attacker)
-        home_sot_val = getattr(match, "home_shots_ot", None)
-        away_sot_val = getattr(match, "away_shots_ot", None)
-        if home_sot_val is not None and not (isinstance(home_sot_val, float) and math.isnan(home_sot_val)):
-            team_shots_ot.setdefault(home, []).append(float(home_sot_val))
-        if away_sot_val is not None and not (isinstance(away_sot_val, float) and math.isnan(away_sot_val)):
-            team_shots_ot.setdefault(away, []).append(float(away_sot_val))
+        for team, value in (
+            (home, getattr(match, "home_shots_ot", None)),
+            (away, getattr(match, "away_shots_ot", None)),
+        ):
+            if _is_observed(value):
+                team_shots_ot.setdefault(team, []).append(float(value))
 
         # Update rolling xG history
-        home_xg_val = getattr(match, "home_xg", None)
-        away_xg_val = getattr(match, "away_xg", None)
-        if home_xg_val is not None and not (isinstance(home_xg_val, float) and math.isnan(home_xg_val)):
-            team_xg.setdefault(home, []).append(float(home_xg_val))
-        if away_xg_val is not None and not (isinstance(away_xg_val, float) and math.isnan(away_xg_val)):
-            team_xg.setdefault(away, []).append(float(away_xg_val))
+        for team, value in (
+            (home, getattr(match, "home_xg", None)),
+            (away, getattr(match, "away_xg", None)),
+        ):
+            if _is_observed(value):
+                team_xg.setdefault(team, []).append(float(value))
 
     return pd.DataFrame(rows)
 
 
 def build_fixture_features(
     fixtures: pd.DataFrame,
+    history: pd.DataFrame | None = None,
     season_stats: dict[str, list[int]] | None = None,
+    fixture_season: str | None = None,
+    rolling_window: int = 5,
 ) -> pd.DataFrame:
-    """Build prediction-time features. Pass season_stats for live in-season context."""
+    """Build prediction-time features for upcoming fixtures.
+
+    When ``history`` is supplied the fixtures are appended to the completed
+    match record and run through the same accumulator that produces the
+    training rows, so a fixture is described by exactly the features the model
+    was fitted on. Without history only Elo and the supplied season table are
+    populated and every form feature falls back to a neutral default, which is
+    a materially weaker input — pass history whenever it exists.
+    """
+    if history is not None and not history.empty:
+        return _fixture_features_from_history(
+            fixtures,
+            history,
+            fixture_season=fixture_season,
+            rolling_window=rolling_window,
+        )
+
     frame = fixtures.copy()
     frame["date"] = pd.to_datetime(frame["date"]).dt.date
     frame["home_elo"] = pd.to_numeric(frame.get("home_elo", 1500), errors="coerce").fillna(1500)
     frame["away_elo"] = pd.to_numeric(frame.get("away_elo", 1500), errors="coerce").fillna(1500)
     frame["elo_diff"] = frame["home_elo"] - frame["away_elo"]
 
-    zero_cols = [c for c in FEATURE_COLUMNS if c not in ("elo_diff", "home_elo", "away_elo")]
-    for col in zero_cols:
-        if col not in frame:
-            frame[col] = 0.0
+    for column in FEATURE_COLUMNS:
+        if column not in frame:
+            frame[column] = NEUTRAL_FEATURE_DEFAULTS.get(column, 0.0)
 
     if season_stats:
         for idx, row in frame.iterrows():
@@ -272,11 +320,74 @@ def build_fixture_features(
     return frame
 
 
+def _fixture_features_from_history(
+    fixtures: pd.DataFrame,
+    history: pd.DataFrame,
+    fixture_season: str | None = None,
+    rolling_window: int = 5,
+) -> pd.DataFrame:
+    """Run fixtures through the training accumulator seeded with completed matches."""
+    completed = history.copy()
+    if "home_goals" in completed and "away_goals" in completed:
+        completed = completed.dropna(subset=["home_goals", "away_goals"])
+
+    upcoming = fixtures.copy()
+    upcoming["date"] = pd.to_datetime(upcoming["date"]).dt.date
+    upcoming["home_goals"] = pd.NA
+    upcoming["away_goals"] = pd.NA
+    if "season" not in upcoming or upcoming["season"].isna().all():
+        upcoming["season"] = fixture_season or _latest_season(completed)
+    if "match_id" not in upcoming:
+        upcoming["match_id"] = [f"fixture-{index}" for index in range(len(upcoming))]
+    upcoming["match_id"] = upcoming["match_id"].astype(str)
+
+    # Re-predicting a match that has already been played is normal here: the
+    # season plan covers every round, past ones included. Drop the completed
+    # copy so the fixture is never described by its own result.
+    if "match_id" in completed.columns:
+        completed = completed[~completed["match_id"].astype(str).isin(set(upcoming["match_id"]))]
+
+    shared = [column for column in completed.columns if column in upcoming.columns]
+    combined = pd.concat(
+        [completed[shared], upcoming[shared]],
+        ignore_index=True,
+    )
+    accumulated = build_training_frame(combined, rolling_window=rolling_window)
+    accumulated["match_id"] = accumulated["match_id"].astype(str)
+
+    fixture_ids = set(upcoming["match_id"])
+    features = accumulated[accumulated["match_id"].isin(fixture_ids)]
+    features = features.drop_duplicates(subset="match_id", keep="last")
+
+    # Keep the caller's fixture metadata (kickoff time, official gameweek, Elo)
+    # and overwrite only the modelled feature columns with accumulated values.
+    by_match = features.set_index("match_id")
+    output = upcoming.copy()
+    for column in FEATURE_COLUMNS:
+        default = NEUTRAL_FEATURE_DEFAULTS.get(column, 0.0)
+        if column in by_match.columns:
+            output[column] = output["match_id"].map(by_match[column]).fillna(default)
+        else:
+            output[column] = default
+    return output.reset_index(drop=True)
+
+
+def _latest_season(matches: pd.DataFrame) -> str:
+    """Return the season code of the most recent completed match."""
+    if "season" not in matches or matches.empty:
+        return "unknown"
+    ordered = matches.sort_values("date")
+    return str(ordered["season"].iloc[-1])
+
+
 # ---------------------------------------------------------------------------
 # Outcome helpers
 # ---------------------------------------------------------------------------
 
-def _outcome(home_goals: int, away_goals: int) -> str:
+def _outcome(home_goals: object, away_goals: object) -> str | None:
+    """Return the match outcome, or None for a fixture that has not been played."""
+    if pd.isna(home_goals) or pd.isna(away_goals):
+        return None
     if home_goals > away_goals:
         return OUTCOME_HOME
     if home_goals < away_goals:
@@ -314,7 +425,9 @@ def _decayed_form(history: list[tuple[int, int]], window: int, decay: float = 0.
     n = len(recent)
     weights = [decay ** (n - 1 - i) for i in range(n)]
     total_w = sum(weights)
-    return float(sum(w * pts for w, (pts, _) in zip(weights, recent)) / total_w)
+    return float(
+        sum(w * pts for w, (pts, _) in zip(weights, recent, strict=True)) / total_w
+    )
 
 
 def _draw_tendency(history: list[tuple[int, int]], window: int = 10) -> float:
@@ -344,9 +457,15 @@ def _current_streak(history: list[tuple[int, int]]) -> int:
     return streak
 
 
+def _is_observed(value: object) -> bool:
+    """True when an optional per-match statistic was actually recorded."""
+    if value is None:
+        return False
+    return not (isinstance(value, float) and math.isnan(value))
+
+
 def _rolling_mean_or_nan(history: list[float], window: int) -> float:
     """Rolling mean of last `window` values, or NaN when history is empty."""
-    import math
 
     recent = history[-window:]
     if not recent:
@@ -363,8 +482,6 @@ def _implied_probs(
 
     Returns (0.0, 0.0, 0.0) when any odds value is missing or invalid.
     """
-    import math
-
     _nan = float("nan")
     try:
         h = float(home_odds)  # type: ignore[arg-type]

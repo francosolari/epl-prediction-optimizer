@@ -44,6 +44,32 @@ class Database:
             )
             connection.execute(
                 """
+                CREATE TABLE IF NOT EXISTS league_entrants (
+                    season TEXT NOT NULL,
+                    entrant TEXT NOT NULL,
+                    place TEXT,
+                    points INTEGER,
+                    goal_diff INTEGER,
+                    PRIMARY KEY (season, entrant)
+                );
+                """
+            )
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS league_picks (
+                    season TEXT NOT NULL,
+                    entrant TEXT NOT NULL,
+                    contest_week INTEGER NOT NULL,
+                    team TEXT NOT NULL,
+                    venue TEXT NOT NULL,
+                    points INTEGER,
+                    goal_diff INTEGER,
+                    PRIMARY KEY (season, entrant, contest_week)
+                );
+                """
+            )
+            connection.execute(
+                """
                 CREATE TABLE IF NOT EXISTS actual_picks (
                     season TEXT NOT NULL,
                     contest_week INTEGER NOT NULL,
@@ -271,6 +297,96 @@ class Database:
                 (pick["season"], int(pick["contest_week"])),
             ).fetchone()
         return dict(row) if row is not None else pick
+
+    def replace_league_data(
+        self,
+        season: str,
+        entrants: list[dict[str, Any]],
+        picks: list[dict[str, Any]],
+    ) -> dict[str, int]:
+        """Replace a season's imported contest standings and entrant picks.
+
+        A re-import is a full replacement rather than a merge: the sheet is the
+        source of truth, and a row that disappeared from it (a withdrawn
+        entrant, a corrected pick) should disappear here too.
+        """
+        with self._connect() as connection:
+            connection.execute("DELETE FROM league_entrants WHERE season = ?", (season,))
+            connection.execute("DELETE FROM league_picks WHERE season = ?", (season,))
+            connection.executemany(
+                """
+                INSERT INTO league_entrants (season, entrant, place, points, goal_diff)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                [
+                    (season, e["entrant"], e.get("place"), e.get("points"), e.get("goal_diff"))
+                    for e in entrants
+                ],
+            )
+            connection.executemany(
+                """
+                INSERT OR REPLACE INTO league_picks
+                    (season, entrant, contest_week, team, venue, points, goal_diff)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                [
+                    (
+                        season,
+                        p["entrant"],
+                        int(p["contest_week"]),
+                        p["team"],
+                        p["venue"],
+                        p.get("points"),
+                        p.get("goal_diff"),
+                    )
+                    for p in picks
+                ],
+            )
+        return {"entrants": len(entrants), "picks": len(picks)}
+
+    def list_league_entrants(self, season: str) -> list[dict[str, Any]]:
+        """Imported entrants for a season, best total first."""
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT * FROM league_entrants WHERE season = ?
+                ORDER BY points DESC NULLS LAST, goal_diff DESC NULLS LAST, entrant
+                """,
+                (season,),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def list_league_picks(
+        self,
+        season: str,
+        entrant: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Imported entrant picks for a season, optionally for one entrant."""
+        query = "SELECT * FROM league_picks WHERE season = ?"
+        params: tuple[Any, ...] = (season,)
+        if entrant:
+            query += " AND entrant = ?"
+            params = (season, entrant)
+        query += " ORDER BY entrant, contest_week"
+        with self._connect() as connection:
+            rows = connection.execute(query, params).fetchall()
+        return [dict(row) for row in rows]
+
+    def set_pick_points(self, season: str, contest_week: int, points: int | None) -> None:
+        """Record the points a stored pick earned.
+
+        Scoring a result is not a new decision, so this deliberately does not
+        touch ``pick_version`` the way upsert_actual_pick does.
+        """
+        with self._connect() as connection:
+            connection.execute(
+                """
+                UPDATE actual_picks
+                SET actual_points = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE season = ? AND contest_week = ?
+                """,
+                (points, season, int(contest_week)),
+            )
 
     def list_actual_picks(self, season: str | None = None) -> list[dict[str, Any]]:
         """List stored user picks, optionally scoped to a season."""

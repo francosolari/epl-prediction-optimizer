@@ -16,6 +16,7 @@ from epl_prediction_optimizer.pipeline import (
     predict_from_processed,
     refresh_data,
     refresh_full_history,
+    refresh_market_odds,
     run_all,
     train_from_processed,
 )
@@ -36,6 +37,18 @@ def main() -> None:
     refresh.add_argument("--network", action="store_true", help=argparse.SUPPRESS)
 
     subcommands.add_parser("refresh-full-history", help="Download all available EPL history")
+
+    subcommands.add_parser("odds", help="Capture current market prices into the odds ledger")
+
+    league = subcommands.add_parser(
+        "import-league", help="Import contest standings from a Google Sheet link"
+    )
+    league.add_argument("url", help="Any Google Sheets link to the standings tab")
+    league.add_argument("--season", default=None, help="Season code the sheet covers")
+    league.add_argument("--gid", default=None, help="Sheet tab id, if not in the URL")
+
+    score = subcommands.add_parser("score", help="Settle committed picks against known results")
+    score.add_argument("--season", default=None, help="Season code (default: active season)")
 
     # --- model commands (Stage A) ---
     subcommands.add_parser("train", help="Train the Stage A probability model")
@@ -75,6 +88,45 @@ def main() -> None:
     with chdir(workdir):
         if args.command == "refresh":
             print(json.dumps(refresh_data(mode="live", season=active_season), indent=2))
+
+        elif args.command == "odds":
+            ledger = refresh_market_odds()
+            print(
+                json.dumps(
+                    {
+                        "priced_fixtures": int(len(ledger)),
+                        "ledger": "data/processed/market_odds.csv",
+                    },
+                    indent=2,
+                )
+            )
+
+        elif args.command == "import-league":
+            from epl_prediction_optimizer.data.league import (
+                fetch_contest_sheet,
+                parse_contest_sheet,
+            )
+            from epl_prediction_optimizer.storage.database import Database
+
+            season_code = args.season or active_season.code
+            entrants, league_picks = parse_contest_sheet(
+                fetch_contest_sheet(args.url, gid=args.gid), season_code
+            )
+            database = Database()
+            summary = database.replace_league_data(
+                season_code,
+                entrants.to_dict(orient="records"),
+                league_picks.to_dict(orient="records"),
+            )
+            database.set_json("league_sheet_url", {"season": season_code, "url": args.url})
+            print(json.dumps({"season": season_code, **summary}, indent=2))
+
+        elif args.command == "score":
+            from epl_prediction_optimizer.challenge import score_committed_picks
+            from epl_prediction_optimizer.storage.database import Database
+
+            season_code = args.season or active_season.code
+            print(json.dumps(score_committed_picks(Database(), season_code), indent=2))
 
         elif args.command == "refresh-full-history":
             print(json.dumps(refresh_full_history(season=active_season), indent=2))

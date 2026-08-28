@@ -1,6 +1,7 @@
 from datetime import date
 
 import pandas as pd
+import pytest
 
 from epl_prediction_optimizer.optimizer.candidates import build_pick_candidates
 from epl_prediction_optimizer.optimizer.solver import optimize_picks
@@ -71,3 +72,74 @@ def test_optimize_picks_enforces_weekly_team_and_venue_limits():
     assert picks.groupby("team").size().max() <= 2
     assert picks.groupby(["team", "venue"]).size().max() <= 1
 
+
+
+def _weekly_candidates(teams: list[str], weeks: int) -> pd.DataFrame:
+    rows = []
+    for week in range(1, weeks + 1):
+        for index, team in enumerate(teams):
+            rows.append(
+                {
+                    "contest_week": week,
+                    "match_id": f"{week}-{team}",
+                    "team": team,
+                    "opponent": "Opponent",
+                    "venue": "home" if week % 2 == index % 2 else "away",
+                    "p_win": 0.4,
+                    "p_draw": 0.2,
+                    "p_loss": 0.4,
+                    "expected_points": 1.4 + (0.03 * index),
+                }
+            )
+    return pd.DataFrame(rows)
+
+
+def test_full_coverage_reports_no_uncovered_teams():
+    picks = optimize_picks(_weekly_candidates(["Arsenal", "Chelsea", "Everton", "Fulham"], 4))
+    assert picks.attrs["uncovered_teams"] == []
+
+
+def test_unsatisfiable_coverage_is_an_error_by_default():
+    """Selecting every team is a contest rule; the solver never quietly drops it."""
+    teams = ["Arsenal", "Chelsea", "Everton", "Fulham"]
+    remaining = _weekly_candidates(teams, 4)
+    remaining = remaining[remaining["contest_week"] > 1]
+
+    with pytest.raises(ValueError, match="Infeasible"):
+        optimize_picks(remaining)
+
+
+def test_best_effort_plan_is_available_only_on_request():
+    """Once a round passes unpicked, no plan can cover every team any more."""
+    teams = ["Arsenal", "Chelsea", "Everton", "Fulham"]
+    candidates = _weekly_candidates(teams, 4)
+    remaining = candidates[candidates["contest_week"] > 1]
+
+    picks = optimize_picks(remaining, allow_incomplete_coverage=True)
+
+    assert len(picks) == 3
+    assert picks["contest_week"].nunique() == 3
+    # Exactly one team cannot be fitted into the three remaining rounds.
+    assert len(picks.attrs["uncovered_teams"]) == 1
+    assert picks.attrs["uncovered_teams"][0] in teams
+    assert picks.attrs["uncovered_teams"][0] not in set(picks["team"])
+
+
+def test_a_solvable_season_reports_no_uncovered_teams_even_when_relaxed():
+    teams = ["Arsenal", "Chelsea", "Everton", "Fulham"]
+    picks = optimize_picks(_weekly_candidates(teams, 4), allow_incomplete_coverage=True)
+    assert picks.attrs["uncovered_teams"] == []
+    assert set(picks["team"]) == set(teams)
+
+
+def test_coverage_relaxation_never_beats_a_coverable_plan():
+    """The penalty must outweigh any expected-points gain from skipping a team."""
+    teams = ["Arsenal", "Chelsea", "Everton", "Fulham"]
+    candidates = _weekly_candidates(teams, 4)
+    # Make one team so attractive that repeating it would win on points alone.
+    candidates.loc[candidates["team"] == "Fulham", "expected_points"] = 3.0
+
+    picks = optimize_picks(candidates)
+
+    assert picks.attrs["uncovered_teams"] == []
+    assert set(picks["team"]) == set(teams)

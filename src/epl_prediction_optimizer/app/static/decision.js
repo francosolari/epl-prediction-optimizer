@@ -157,3 +157,15 @@
   });
   renderSelection();
 })();
+
+// The full refresh runs the pipeline synchronously and takes a minute or two.
+// Without feedback the page looks frozen and invites a second submit.
+(() => {
+  const button = document.querySelector("[data-refresh-action]");
+  if (!button) return;
+  button.form?.addEventListener("submit", () => {
+    button.disabled = true;
+    button.textContent = "Refreshing… this takes a minute";
+    button.setAttribute("aria-busy", "true");
+  });
+})();

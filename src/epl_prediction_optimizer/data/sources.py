@@ -453,9 +453,9 @@ def _openfootball_season_dir(season_code: str) -> str:
 
 def fetch_openfootball_gameweeks(
     season_code: str,
-    cache_dir: "Path",
+    cache_dir: Path,
     force: bool = False,
-) -> "pd.DataFrame":
+) -> pd.DataFrame:
     """Fetch official PL matchday (gameweek) numbers from openfootball GitHub.
 
     Returns DataFrame with columns: date, home_team, away_team, contest_week.
@@ -609,16 +609,15 @@ _UNDERSTAT_TEAM_MAP = {
 
 def fetch_understat_xg(
     season_code: str,
-    cache_dir: "Path",
+    cache_dir: Path,
     force: bool = False,
-) -> "pd.DataFrame":
+) -> pd.DataFrame:
     """Fetch Understat xG data for one EPL season, caching to CSV.
 
     season_code is like "2324" (= 2023-24, start year 2023).
     Returns DataFrame with columns: date, home_team, away_team, home_xg, away_xg.
     Returns empty DataFrame on any failure.
     """
-    import json as _json
 
     cache_path = cache_dir / f"{season_code}_understat_xg.csv"
     if cache_path.exists() and not force:
@@ -678,7 +677,7 @@ def fetch_understat_xg(
     return frame
 
 
-def attach_understat_xg(matches: "pd.DataFrame", xg_data: "pd.DataFrame") -> "pd.DataFrame":
+def attach_understat_xg(matches: pd.DataFrame, xg_data: pd.DataFrame) -> pd.DataFrame:
     """Left-join Understat xG onto matches by date + home_team + away_team.
 
     Adds home_xg and away_xg columns (NaN where no match found).
@@ -727,3 +726,117 @@ def _parse_football_data_dates(dates: pd.Series) -> pd.Series:
             errors="coerce",
         )
     return parsed.dt.date
+
+
+# ---------------------------------------------------------------------------
+# Market odds
+# ---------------------------------------------------------------------------
+
+FOOTBALL_DATA_FIXTURES_FEED = "https://www.football-data.co.uk/fixtures.csv"
+MARKET_ODDS_COLUMNS = [
+    "date",
+    "home_team",
+    "away_team",
+    "home_odds",
+    "draw_odds",
+    "away_odds",
+    "avg_home_odds",
+    "avg_draw_odds",
+    "avg_away_odds",
+    "captured_at",
+]
+
+
+def http_get_bytes(url: str, timeout: int = 30) -> bytes:
+    """GET a URL, using curl_cffi browser impersonation when it is installed.
+
+    football-data.co.uk sits behind bot protection that intermittently rejects
+    the default python TLS fingerprint. curl_cffi impersonates a real Chrome
+    handshake; plain requests remains the fallback so the package still works
+    without the optional dependency.
+    """
+    try:
+        from curl_cffi import requests as curl_requests
+    except ImportError:
+        response = requests.get(url, timeout=timeout)
+        response.raise_for_status()
+        return response.content
+    try:
+        response = curl_requests.get(url, impersonate="chrome", timeout=timeout)
+        response.raise_for_status()
+        return response.content
+    except Exception:  # noqa: BLE001 - any transport failure falls back to requests
+        response = requests.get(url, timeout=timeout)
+        response.raise_for_status()
+        return response.content
+
+
+def fetch_market_odds(division: str = EPL_DIVISION) -> pd.DataFrame:
+    """Fetch pre-match 1X2 prices for upcoming fixtures from football-data.co.uk.
+
+    The public fixtures feed carries the same B365H/B365D/B365A columns as the
+    per-season historical CSVs, so live prices and backtest prices come from
+    one schema. Avg* columns are the cross-bookmaker consensus, which is the
+    more stable signal when a single book moves early.
+    """
+    payload = http_get_bytes(FOOTBALL_DATA_FIXTURES_FEED)
+    raw = pd.read_csv(StringIO(payload.decode("utf-8-sig")), on_bad_lines="skip")
+    if "Div" not in raw.columns:
+        return pd.DataFrame(columns=MARKET_ODDS_COLUMNS)
+    raw = raw[raw["Div"] == division]
+    if raw.empty:
+        return pd.DataFrame(columns=MARKET_ODDS_COLUMNS)
+
+    frame = pd.DataFrame(
+        {
+            "date": _parse_football_data_dates(raw["Date"]),
+            "home_team": raw["HomeTeam"].map(normalize_team_name),
+            "away_team": raw["AwayTeam"].map(normalize_team_name),
+            "home_odds": pd.to_numeric(raw.get("B365H"), errors="coerce"),
+            "draw_odds": pd.to_numeric(raw.get("B365D"), errors="coerce"),
+            "away_odds": pd.to_numeric(raw.get("B365A"), errors="coerce"),
+            "avg_home_odds": pd.to_numeric(raw.get("AvgH"), errors="coerce"),
+            "avg_draw_odds": pd.to_numeric(raw.get("AvgD"), errors="coerce"),
+            "avg_away_odds": pd.to_numeric(raw.get("AvgA"), errors="coerce"),
+        }
+    )
+    frame = frame.dropna(subset=["date", "home_team", "away_team"])
+    frame["captured_at"] = pd.Timestamp.now(tz="UTC").isoformat()
+    return frame[MARKET_ODDS_COLUMNS].reset_index(drop=True)
+
+
+def update_market_odds_ledger(ledger_path: Path, fetched: pd.DataFrame) -> pd.DataFrame:
+    """Merge newly fetched prices into the durable odds ledger and return it.
+
+    The upcoming-fixtures feed drops a match as soon as it kicks off, so prices
+    must be persisted to stay available for scoring and for retraining once the
+    match becomes history. The most recent capture for a fixture wins.
+    """
+    ledger_path.parent.mkdir(parents=True, exist_ok=True)
+    existing = pd.read_csv(ledger_path) if ledger_path.exists() else pd.DataFrame()
+    combined = pd.concat([existing, fetched], ignore_index=True)
+    if combined.empty:
+        return pd.DataFrame(columns=MARKET_ODDS_COLUMNS)
+    combined["date"] = pd.to_datetime(combined["date"], errors="coerce").dt.date.astype(str)
+    combined = combined.dropna(subset=["date"])
+    combined = combined.sort_values("captured_at").drop_duplicates(
+        subset=["date", "home_team", "away_team"], keep="last"
+    )
+    combined = combined.sort_values(["date", "home_team"]).reset_index(drop=True)
+    combined.to_csv(ledger_path, index=False)
+    return combined
+
+
+def market_odds_from_matches(matches: pd.DataFrame) -> pd.DataFrame:
+    """Extract the canonical odds frame from historical match rows.
+
+    football-data.co.uk carries B365 closing prices from 2002-03 onwards, which
+    is what makes an honest market backtest possible without any scraping.
+    """
+    required = {"date", "home_team", "away_team", "home_odds", "draw_odds", "away_odds"}
+    if not required.issubset(matches.columns):
+        return pd.DataFrame(columns=MARKET_ODDS_COLUMNS)
+    frame = matches[sorted(required)].copy()
+    frame["date"] = pd.to_datetime(frame["date"], errors="coerce").dt.date.astype(str)
+    frame = frame.dropna(subset=["home_odds", "draw_odds", "away_odds"])
+    return frame.reset_index(drop=True)

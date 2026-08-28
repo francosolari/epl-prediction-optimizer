@@ -4,18 +4,19 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>EPL Prediction Optimizer · {{ season.label }}</title>
-    <link rel="stylesheet" href="/static/styles.css">
-    <script defer src="/static/decision.js"></script>
+    <link rel="stylesheet" href="/static/styles.css?v={{ asset_version }}">
+    <script defer src="/static/decision.js?v={{ asset_version }}"></script>
   </head>
   <body class="decision-page">
     <aside class="context-rail">
       <a class="brand" href="/">P/O</a>
       <nav aria-label="Primary navigation">
-        <a class="is-active" href="/" aria-current="page"><span>01</span>Decision</a>
+        <a class="is-active" aria-current="page" href="/"><span>01</span>Decision</a>
         <a href="/challenge?season={{ season.code }}"><span>02</span>Season</a>
-        <a href="/model"><span>03</span>Model</a>
-        <a href="/data"><span>04</span>Data</a>
-        <a href="/backtest"><span>05</span>Backtest</a>
+        <a href="/scorecard?season={{ season.code }}"><span>03</span>Scorecard</a>
+        <a href="/model"><span>04</span>Model</a>
+        <a href="/data"><span>05</span>Data</a>
+        <a href="/backtest"><span>06</span>Backtest</a>
       </nav>
       <div class="rail-status">
         <span class="status-dot"></span>
@@ -33,9 +34,28 @@
         </div>
         <div class="header-tools">
           <div class="freshness"><span>Model state</span><strong>{{ status.last_action | default("Ready") }}</strong></div>
+          <form method="post" class="refresh-form"><button class="primary-action" formaction="/actions/run-all" data-refresh-action>Refresh everything</button></form>
           <button class="theme-toggle" type="button" data-theme-toggle aria-label="Change color theme">System</button>
         </div>
       </header>
+
+      {% if readiness %}
+      <details class="readiness-panel" {% if not readiness.all_ok %}open{% endif %}>
+        <summary>
+          <span class="readiness-dot {{ 'is-ok' if readiness.all_ok else 'is-warn' }}"></span>
+          {% if readiness.all_ok %}Inputs current — everything below fed this week&rsquo;s numbers{% else %}Check inputs before picking{% endif %}
+        </summary>
+        <ul class="readiness-list">
+          {% for check in readiness.checks %}
+          <li class="{{ 'is-ok' if check.ok else 'is-warn' }}">
+            <span class="readiness-label">{{ check.label }}</span>
+            <strong>{{ check.value }}</strong>
+            <em>{{ check.detail }}</em>
+          </li>
+          {% endfor %}
+        </ul>
+      </details>
+      {% endif %}
 
       {% if decision.weeks %}
       <nav class="round-navigator" aria-label="Contest week navigation">
@@ -54,13 +74,33 @@
         <div class="candidate-panel">
           <div class="panel-heading">
             <div><span class="panel-index">01</span><h2>Candidate comparison</h2></div>
-            <p>Ranked by full-season expected value</p>
+            <p>Ranked by chance of winning the contest</p>
           </div>
-          <div class="candidate-head" aria-hidden="true"><span>Choice</span><span>Win</span><span>xPts</span><span>Season cost</span></div>
+          {% if decision.submission %}
+          <div class="submission" role="status">
+            <p class="submission-headline">Week {{ decision.selected_week }} committed · {{ decision.committed.team }}</p>
+            <p class="submission-preview"><span>To</span> {{ decision.submission.to }}<br><span>Subject</span> {{ decision.submission.subject }}<br><span>Body</span> {{ decision.submission.body }}</p>
+            <p class="submission-actions">
+              <a class="primary-action" href="{{ decision.submission.gmail_url }}" target="_blank" rel="noopener">Send in Gmail</a>
+              <a class="secondary-action" href="{{ decision.submission.mailto_url }}">Use default mail app</a>
+            </p>
+          </div>
+          {% endif %}
+          {% if decision.verdict %}
+          <div class="verdict verdict--{{ decision.verdict.band|replace(' ', '-') }}" role="status">
+            <p class="verdict-headline">
+              <span class="verdict-call">{{ decision.verdict.headline }}</span>
+              <span class="verdict-band">{{ decision.verdict.band }}</span>
+            </p>
+            <p class="verdict-guidance">{{ decision.verdict.guidance }}</p>
+          </div>
+          {% endif %}
+          <div class="candidate-head" aria-hidden="true"><span>Choice</span><span>Score</span><span>Win</span><span>xPts</span><span>Season cost</span></div>
           <div class="candidate-list" role="radiogroup" aria-label="Candidate picks">
             {% for item in decision.scenarios %}
             <article class="candidate-row {% if item.selected or (not decision.committed and item.season_rank == 1) %}is-selected{% endif %} {% if not item.feasible %}is-disabled{% endif %}" data-scenario-id="{{ item.match_id }}-{{ item.team|replace(' ', '-') }}" tabindex="{% if item.feasible %}0{% else %}-1{% endif %}" role="radio" aria-checked="{{ 'true' if item.selected or (not decision.committed and item.season_rank == 1) else 'false' }}">
               <div class="candidate-team"><span class="rank">{{ item.season_rank if item.feasible else '—' }}</span><div><strong>{{ item.team }}</strong><small>{{ item.venue|capitalize }} vs {{ item.opponent }} · {{ item.date }}</small></div></div>
+              <strong class="metric score">{% if item.recommendation is not none %}{{ item.recommendation }}{% if item.tier == "equivalent" %}<span class="tier-flag" title="Within the model's margin of error of the top choice">=</span>{% endif %}{% else %}—{% endif %}</strong>
               <strong class="metric">{{ "%.0f"|format(item.p_win * 100) }}%</strong>
               <strong class="metric">{{ "%.2f"|format(item.expected_points) }}</strong>
               <strong class="metric cost">{% if item.feasible %}{{ "%.2f"|format(item.season_cost) }}{% else %}Conflict{% endif %}</strong>
@@ -96,7 +136,7 @@
         </div>
       </section>
 
-      <details class="analysis-drawer"><summary>Analysis controls and data health</summary><div><form method="post"><button formaction="/actions/refresh">Refresh data</button><button formaction="/actions/train">Train model</button><button formaction="/actions/predict">Publish forecasts</button><button formaction="/actions/optimize">Re-optimize</button></form><a href="/backtest">Backtests</a><a href="/data">Source data</a></div></details>
+      <details class="analysis-drawer"><summary>Analysis controls and data health</summary><div><p class="drawer-note">“Refresh everything” above runs all four steps. Use these to run one on its own.</p><form method="post"><button formaction="/actions/refresh">Refresh data</button><button formaction="/actions/train">Train model</button><button formaction="/actions/predict">Publish forecasts</button><button formaction="/actions/optimize">Re-optimize</button></form><a href="/backtest">Backtests</a><a href="/data">Source data</a></div></details>
       {% else %}
       <section class="first-run"><p class="section-code">Season preparation</p><h2>No verified {{ season.label }} forecasts yet</h2><p>Refresh current fixtures, train on completed matches, and calculate the first decision set.</p><form method="post"><button class="primary-action" formaction="/actions/run-all">Prepare season</button></form><small>Live failures remain visible; sample data is never presented as current.</small></section>
       {% endif %}

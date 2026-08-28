@@ -11,6 +11,7 @@ import pandas as pd
 import requests
 from sklearn.metrics import accuracy_score, log_loss
 
+from epl_prediction_optimizer.challenge import score_committed_picks
 from epl_prediction_optimizer.config.season import SeasonContext
 from epl_prediction_optimizer.data.sources import (
     DEFAULT_SEASON_CODES,
@@ -20,14 +21,18 @@ from epl_prediction_optimizer.data.sources import (
     attach_understat_xg,
     download_historical_results,
     fetch_clubelo_history,
+    fetch_market_odds,
     fetch_understat_xg,
     fetch_upcoming_fixtures,
     get_cached_pl_matches,
+    market_odds_from_matches,
     read_historical_results,
     sample_upcoming_fixtures,
+    update_market_odds_ledger,
 )
 from epl_prediction_optimizer.ml.analysis import expected_calibration_error
 from epl_prediction_optimizer.ml.features import FEATURE_COLUMNS, build_training_frame
+from epl_prediction_optimizer.ml.market import blend_probabilities
 from epl_prediction_optimizer.ml.model import (
     ModelRun,
     season_decay_weights,
@@ -42,7 +47,19 @@ from epl_prediction_optimizer.paths import (
     RAW_DIR,
     ensure_data_dirs,
 )
+from epl_prediction_optimizer.scoring import actual_outcome as _actual_outcome
+from epl_prediction_optimizer.scoring import score_picks as _score_optimized_picks
 from epl_prediction_optimizer.storage.database import Database
+
+# Share of the final probability taken from de-vigged market prices, applied
+# only to fixtures that are actually priced. A sweep over 2018-19..2025-26
+# (scripts/backtest_market_blend.py) bottoms at 0.90 and is flat from 0.8 to
+# 1.0. The market prices these matches with vastly more information than this
+# model has, so where a price exists it leads; the residual 0.10 is a guard
+# against a stale or mis-joined price deciding a pick on its own, not a claim
+# that the model knows better. See docs/model-evaluation.md.
+MARKET_BLEND_WEIGHT = 0.90
+MARKET_DEVIG_METHOD = "power"
 
 
 class LiveFixturesUnavailableError(RuntimeError):
@@ -144,10 +161,21 @@ def predict_from_processed(
     fixtures = pd.read_csv(PROCESSED_DIR / "fixtures.csv")
     active_season = season or SeasonContext.current_season()
     current_stats = _compute_current_season_stats(active_season)
-    predictions = model_run.predict(fixtures, season_stats=current_stats)
+    history = _completed_matches()
+    predictions = model_run.predict(
+        fixtures,
+        season_stats=current_stats,
+        history=history,
+        fixture_season=active_season.code,
+    )
+    predictions = _apply_market_blend(predictions)
     output_path = EXPORT_DIR / "fixture_probabilities.csv"
     predictions.to_csv(output_path, index=False)
-    (database or Database()).set_json("predictions", predictions.to_dict(orient="records"))
+    db = database or Database()
+    db.set_json("predictions", predictions.to_dict(orient="records"))
+    # Results arrive with the same refresh that produces these forecasts, so
+    # this is the natural point to settle any committed pick that now has one.
+    score_committed_picks(db, active_season.code, history)
     return predictions
 
 
@@ -247,6 +275,7 @@ def refresh_full_history(season: SeasonContext | None = None) -> dict[str, str]:
         historical.to_csv(historical_path, index=False)
         db = Database()
         db.upsert_historical_matches(historical)
+    refresh_market_odds()
     return result
 
 
@@ -293,7 +322,12 @@ def refresh_current_season(
     if fixtures.empty:
         fixtures = _fixtures_from_current_season(historical, target_season)
     historical = _attach_all_understat_xg(historical)
+    # The active season is rebuilt from the official API, which carries no Elo.
+    # Without this the dominant feature sits at its 1500 default for every
+    # current-season row that later feeds training.
+    historical = _refresh_active_season_elo(historical, target_season)
     historical.to_csv(historical_path, index=False)
+    refresh_market_odds()
     fixtures_path = PROCESSED_DIR / "fixtures.csv"
     fixtures.to_csv(fixtures_path, index=False)
     seasons_path = PROCESSED_DIR / "available_seasons.csv"
@@ -641,6 +675,68 @@ def _get_cached_official_season(season_code: str, force: bool = False) -> pd.Dat
         return pd.DataFrame()
 
 
+def _completed_matches() -> pd.DataFrame:
+    """Read processed history restricted to matches with a final score."""
+    path = PROCESSED_DIR / "historical_matches.csv"
+    if not path.exists():
+        return pd.DataFrame()
+    matches = pd.read_csv(path)
+    if "home_goals" not in matches or "away_goals" not in matches:
+        return pd.DataFrame()
+    return matches.dropna(subset=["home_goals", "away_goals"])
+
+
+def _refresh_active_season_elo(historical: pd.DataFrame, target_season: str) -> pd.DataFrame:
+    """Re-attach ClubElo ratings to the active season's rows."""
+    if historical.empty or "season" not in historical:
+        return historical
+    is_active = historical["season"].astype(str).str.zfill(4) == target_season
+    if not is_active.any():
+        return historical
+    active = _attach_elo_cache(historical[is_active].copy())
+    return pd.concat([historical[~is_active], active], ignore_index=True)
+
+
+def refresh_market_odds() -> pd.DataFrame:
+    """Capture current pre-match prices into the durable odds ledger."""
+    try:
+        fetched = fetch_market_odds()
+    except (requests.RequestException, ValueError, pd.errors.ParserError):
+        return read_market_odds()
+    if fetched.empty:
+        return read_market_odds()
+    return update_market_odds_ledger(PROCESSED_DIR / "market_odds.csv", fetched)
+
+
+def read_market_odds() -> pd.DataFrame:
+    """Read the persisted odds ledger, falling back to prices held in history."""
+    ledger_path = PROCESSED_DIR / "market_odds.csv"
+    ledger = pd.read_csv(ledger_path) if ledger_path.exists() else pd.DataFrame()
+    historical_odds = market_odds_from_matches(_completed_matches())
+    frames = [frame for frame in (ledger, historical_odds) if not frame.empty]
+    if not frames:
+        return pd.DataFrame()
+    return pd.concat(frames, ignore_index=True)
+
+
+def _apply_market_blend(predictions: pd.DataFrame) -> pd.DataFrame:
+    """Pool model probabilities with de-vigged market prices where prices exist.
+
+    Only the priced rounds move; unpriced future fixtures keep pure model
+    probabilities so the season-long plan stays internally consistent.
+    """
+    if MARKET_BLEND_WEIGHT <= 0.0:
+        blended = predictions.copy()
+        blended["market_weight"] = 0.0
+        return blended
+    return blend_probabilities(
+        predictions,
+        read_market_odds(),
+        weight=MARKET_BLEND_WEIGHT,
+        method=MARKET_DEVIG_METHOD,
+    )
+
+
 def _compute_current_season_stats(
     season: SeasonContext,
 ) -> dict[str, list[int]]:
@@ -696,32 +792,3 @@ def _attach_all_understat_xg(historical: pd.DataFrame, network: bool = True) -> 
 
     combined_xg = pd.concat(all_xg_frames, ignore_index=True)
     return attach_understat_xg(frame, combined_xg)
-
-
-def _actual_outcome(row: pd.Series) -> str:
-    if row["home_goals"] > row["away_goals"]:
-        return "HOME_WIN"
-    if row["home_goals"] < row["away_goals"]:
-        return "AWAY_WIN"
-    return "DRAW"
-
-
-def _score_optimized_picks(picks: pd.DataFrame, evaluated: pd.DataFrame) -> pd.DataFrame:
-    rows = []
-    actual_by_match = evaluated.set_index("match_id")
-    for pick in picks.itertuples(index=False):
-        match = actual_by_match.loc[pick.match_id]
-        if match.home_goals == match.away_goals:
-            points = 1
-        elif pick.team == match.home_team and match.home_goals > match.away_goals:
-            points = 3
-        elif pick.team == match.away_team and match.away_goals > match.home_goals:
-            points = 3
-        else:
-            points = 0
-        row = pick._asdict()
-        row["actual_points"] = points
-        row["home_goals"] = int(match.home_goals)
-        row["away_goals"] = int(match.away_goals)
-        rows.append(row)
-    return pd.DataFrame(rows)

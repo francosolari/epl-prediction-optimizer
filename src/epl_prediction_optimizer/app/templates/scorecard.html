@@ -1,0 +1,186 @@
+<!doctype html>
+<html lang="en" data-theme="system">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Scorecard · EPL Prediction Optimizer</title>
+    <link rel="stylesheet" href="/static/styles.css?v={{ asset_version }}">
+    <script defer src="/static/decision.js?v={{ asset_version }}"></script>
+  </head>
+  <body class="analysis-page">
+    <header class="shell-header">
+      <a class="legacy-brand" href="/">P/O</a>
+      <nav class="nav-rail" aria-label="Primary">
+        <a href="/"><span>01</span>Decision</a>
+        <a href="/challenge?season={{ season }}"><span>02</span>Season</a>
+        <a class="active" href="/scorecard?season={{ season }}"><span>03</span>Scorecard</a>
+        <a href="/model"><span>04</span>Model</a>
+        <a href="/data"><span>05</span>Data</a>
+        <a href="/backtest"><span>06</span>Backtest</a>
+      </nav>
+      <div class="title-block">
+        <p class="eyebrow">Season {{ season }}</p>
+        <h1>Scorecard</h1>
+      </div>
+      <div class="system-state">
+        <span>{{ summary.scored }} scored</span>
+        <strong>{{ summary.points }} pts</strong>
+        <button class="theme-toggle" type="button" data-theme-toggle aria-label="Change color theme">System</button>
+      </div>
+    </header>
+
+    <main class="workspace">
+      <section class="command-strip">
+        <form class="filter-bar" method="get" action="/scorecard">
+          <label><span>Season</span><input name="season" value="{{ season }}" aria-label="Season"></label>
+          <button type="submit">View</button>
+        </form>
+      </section>
+
+      <section class="summary-grid" aria-label="Season summary">
+        <div class="metric-tile"><span>Points</span><strong>{{ summary.points }}</strong></div>
+        <div class="metric-tile"><span>Record</span><strong>{{ summary.wins }}–{{ summary.draws }}–{{ summary.losses }}</strong></div>
+        <div class="metric-tile"><span>Per pick</span><strong>{{ "%.2f"|format(summary.avg_points) }}</strong></div>
+        <div class="metric-tile"><span>Awaiting result</span><strong>{{ summary.pending }}</strong></div>
+        {% if standing %}
+        <div class="metric-tile"><span>Place in field</span><strong>{{ standing.place }} / {{ standing.entrants }}</strong></div>
+        {% endif %}
+        {% if chances %}
+        <div class="metric-tile"><span>Chance of winning</span><strong>{{ "%.1f%%"|format(chances.win_probability * 100) }}</strong></div>
+        {% endif %}
+      </section>
+
+      {% if chances %}
+      <p class="empty-copy">
+        Projected from the remaining plan against a field of {{ chances.rivals|int }} rivals drawn from
+        the {{ chances.field_season }} finishing totals (median {{ chances.field_median|int }}). Ties count as losses.
+      </p>
+      {% endif %}
+
+      <section class="pick-ledger" aria-label="My picks">
+        <div class="section-heading">
+          <h2>My picks</h2>
+          <p>Every committed round, scored against the final result.</p>
+        </div>
+        <div class="grid-scroll">
+          <table class="scorecard-grid">
+            <thead>
+              <tr>
+                <th scope="col">Week</th><th scope="col">Team</th><th scope="col">Venue</th>
+                <th scope="col">Opponent</th><th scope="col">Result</th>
+                <th scope="col">Model</th><th scope="col">Pts</th><th scope="col">Total</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for row in my_picks %}
+              <tr class="{{ row.state_class }}">
+                <td>{{ row.contest_week }}</td>
+                <th scope="row">{{ row.team }}</th>
+                <td>{{ "H" if row.venue == "home" else "A" }}</td>
+                <td>{{ row.opponent or "—" }}</td>
+                <td>{{ row.result_label or "—" }}</td>
+                <td>{{ "%.0f%%"|format(row.p_win * 100) if row.p_win else "—" }}</td>
+                <td><strong>{{ row.points if row.points is not none else "—" }}</strong></td>
+                <td>{{ row.running_total if row.points is not none else "—" }}</td>
+              </tr>
+              {% else %}
+              <tr><td colspan="8" class="empty-copy">No committed picks for {{ season }} yet.</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="pick-ledger" aria-label="Leaderboard">
+        <div class="section-heading">
+          <h2>Leaderboard</h2>
+          <p>{% if entrants %}{{ entrants|length }} entrants imported from the contest sheet.{% else %}Paste the contest sheet link below to compare against the field.{% endif %}</p>
+        </div>
+        {% if import_error %}<p class="import-note is-error" role="alert"><strong>Import failed.</strong> {{ import_error }}</p>{% endif %}
+        {% if imported %}<p class="import-note is-ok" role="status"><strong>Imported.</strong> {{ imported.entrants }} entrants and {{ imported.picks }} picks for season {{ imported.season }}.</p>{% endif %}
+        <form class="import-form" method="post" action="/actions/import-league">
+          <label class="import-url">
+            <span>Contest sheet link</span>
+            <input name="url" type="url" required value="{{ league_url or '' }}" placeholder="https://docs.google.com/spreadsheets/d/…" aria-describedby="import-help">
+          </label>
+          <label class="import-season">
+            <span>Season the sheet covers</span>
+            <input name="season" value="{{ season }}" pattern="[0-9]{4}" required aria-describedby="import-help">
+          </label>
+          <button class="primary-action" type="submit">Import sheet</button>
+          <p class="import-help" id="import-help">
+            Copy the link straight from your browser’s address bar, with the tab open on the
+            standings grid. The sheet must be shared as “Anyone with the link can view”.
+            <strong>Season is the season that sheet covers</strong> — last year’s sheet is
+            <code>2526</code>, this year’s is <code>2627</code>.
+          </p>
+        </form>
+        {% if entrants %}
+        <div class="grid-scroll">
+          <table class="scorecard-grid">
+            <thead><tr><th scope="col">Place</th><th scope="col">Entrant</th><th scope="col">Pts</th><th scope="col">GD</th><th scope="col">Rounds</th></tr></thead>
+            <tbody>
+              {% for entrant in entrants %}
+              <tr class="{{ 'is-me' if entrant.is_me else '' }}">
+                <td>{{ entrant.place or "—" }}</td>
+                <th scope="row"><a href="/scorecard?season={{ season }}&entrant={{ entrant.entrant | urlencode }}">{{ entrant.entrant }}</a></th>
+                <td><strong>{{ entrant.points if entrant.points is not none else "—" }}</strong></td>
+                <td>{{ entrant.goal_diff if entrant.goal_diff is not none else "—" }}</td>
+                <td>{{ entrant.rounds }}</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% endif %}
+      </section>
+
+      {% if entrant_picks %}
+      <section class="pick-ledger" aria-label="Entrant picks">
+        <div class="section-heading">
+          <h2>{{ selected_entrant }}</h2>
+          <p>Their season, round by round.</p>
+        </div>
+        <div class="grid-scroll">
+          <table class="scorecard-grid">
+            <thead><tr><th scope="col">Week</th><th scope="col">Team</th><th scope="col">Venue</th><th scope="col">Pts</th><th scope="col">GD</th></tr></thead>
+            <tbody>
+              {% for pick in entrant_picks %}
+              <tr><td>{{ pick.contest_week }}</td><th scope="row">{{ pick.team }}</th>
+                  <td>{{ "H" if pick.venue == "home" else "A" }}</td>
+                  <td><strong>{{ pick.points if pick.points is not none else "—" }}</strong></td>
+                  <td>{{ pick.goal_diff if pick.goal_diff is not none else "—" }}</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </section>
+      {% endif %}
+
+      {% if popular %}
+      <section class="pick-ledger" aria-label="Field consensus">
+        <div class="section-heading">
+          <h2>What the field did</h2>
+          <p>The most-taken team each round. Rounds where the field crowds onto one team are where a different call separates you from it.</p>
+        </div>
+        <div class="grid-scroll">
+          <table class="scorecard-grid">
+            <thead><tr><th scope="col">Week</th><th scope="col">Most taken</th><th scope="col">Share</th><th scope="col">Avg pts</th><th scope="col">My pick</th></tr></thead>
+            <tbody>
+              {% for row in popular %}
+              <tr>
+                <td>{{ row.contest_week }}</td>
+                <th scope="row">{{ row.team }}</th>
+                <td>{{ "%.0f%%"|format(row.share * 100) }}</td>
+                <td>{{ "%.2f"|format(row.avg_points) }}</td>
+                <td>{{ row.mine or "—" }}</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </section>
+      {% endif %}
+    </main>
+  </body>
+</html>

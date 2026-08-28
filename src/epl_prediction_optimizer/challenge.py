@@ -3,8 +3,14 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pandas as pd
+
+from epl_prediction_optimizer.paths import PROCESSED_DIR
+
+if TYPE_CHECKING:
+    from epl_prediction_optimizer.storage.database import Database
 
 
 def load_challenge_rows(runtime_dir: Path, season: str, actual_picks: list[dict]) -> list[dict]:
@@ -134,3 +140,84 @@ def _result_label(row: dict) -> str:
         return f"Draw {int(home_goals)}-{int(away_goals)}"
     winner = row["home_team"] if home_goals > away_goals else row["away_team"]
     return f"{winner} won {int(home_goals)}-{int(away_goals)}"
+
+
+def pick_points(pick_team: str, home_team: str, home_goals: float, away_goals: float) -> int:
+    """Contest points a pick earns: 3 for a win, 1 for a draw, 0 for a defeat."""
+    if home_goals == away_goals:
+        return 1
+    picked_home = pick_team == home_team
+    home_won = home_goals > away_goals
+    return 3 if picked_home == home_won else 0
+
+
+def score_committed_picks(
+    database: Database,
+    season: str,
+    matches: pd.DataFrame | None = None,
+) -> dict[str, int]:
+    """Fill in ``actual_points`` for committed picks whose match has a final score.
+
+    Committing a pick records the intent; nothing else was ever writing the
+    result back, so a season's points stayed at zero however many rounds had
+    been played. This resolves every stored pick against the processed match
+    record and is safe to re-run — a pick already carrying the same score is
+    left alone, and a corrected result overwrites the old one.
+    """
+    if matches is None:
+        matches_path = PROCESSED_DIR / "historical_matches.csv"
+        matches = _read_optional_csv(matches_path)
+    if matches.empty or "match_id" not in matches:
+        return {"scored": 0, "pending": len(database.list_actual_picks(season))}
+
+    played = matches.dropna(subset=["home_goals", "away_goals"]).copy()
+    played["match_id"] = played["match_id"].astype(str)
+    results = played.drop_duplicates(subset="match_id", keep="last").set_index("match_id")
+
+    # Picks are stored with the match_id of whichever source produced the
+    # fixture list, which is not always the id in the processed match record —
+    # the official API numbers a match differently from football-data.co.uk.
+    # Team, venue, and round identify the same match under either scheme.
+    by_slot = _matches_by_slot(played, season)
+
+    scored = 0
+    pending = 0
+    for pick in database.list_actual_picks(season):
+        match = None
+        match_id = str(pick.get("match_id", ""))
+        if match_id in results.index:
+            match = results.loc[match_id]
+        else:
+            match = by_slot.get((int(pick["contest_week"]), pick["team"], pick["venue"]))
+        if match is None:
+            pending += 1
+            continue
+        points = pick_points(
+            pick["team"], match["home_team"], match["home_goals"], match["away_goals"]
+        )
+        if pick.get("actual_points") == points:
+            continue
+        database.set_pick_points(pick["season"], int(pick["contest_week"]), points)
+        scored += 1
+    return {"scored": scored, "pending": pending}
+
+
+def _matches_by_slot(played: pd.DataFrame, season: str) -> dict[tuple[int, str, str], pd.Series]:
+    """Index a season's completed matches by (contest week, team, venue)."""
+    if "season" not in played or "contest_week" not in played:
+        return {}
+    season_matches = played[played["season"].astype(str).str.zfill(4) == str(season).zfill(4)]
+    index: dict[tuple[int, str, str], pd.Series] = {}
+    for match in season_matches.itertuples(index=False):
+        week = int(match.contest_week)
+        row = pd.Series(
+            {
+                "home_team": match.home_team,
+                "away_team": match.away_team,
+                "home_goals": match.home_goals,
+                "away_goals": match.away_goals,
+            }
+        )
+        index[(week, match.home_team, "home")] = row
+        index[(week, match.away_team, "away")] = row
+    return index
