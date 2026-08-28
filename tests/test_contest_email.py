@@ -66,28 +66,35 @@ def test_without_an_account_the_link_uses_whatever_gmail_defaults_to() -> None:
     assert "/u/" not in url
 
 
-def test_pinning_an_account_targets_it_in_the_path() -> None:
-    """With several accounts signed in, the default is not predictable."""
+def test_a_numeric_index_selects_the_account_in_the_path() -> None:
+    """Gmail picks the account from the digit in /mail/u/<n>/ and nothing else."""
+    email = compose_pick_email(2, "Coventry City", "Hull City", account="1")
+    assert email["gmail_url"].startswith("https://mail.google.com/mail/u/1/?")
+    assert email["account"] == "1"
+
+
+def test_an_address_is_passed_as_authuser_not_as_a_path_segment() -> None:
+    """An address in the path is ignored and silently falls back to the default."""
     email = compose_pick_email(2, "Coventry City", "Hull City", account="franco@gmail.com")
-    assert email["gmail_url"].startswith("https://mail.google.com/mail/u/franco%40gmail.com/?")
-    assert email["account"] == "franco@gmail.com"
+    assert "/mail/u/franco" not in email["gmail_url"]
+    assert "authuser=franco%40gmail.com" in email["gmail_url"]
 
 
 def test_the_account_can_come_from_the_environment(monkeypatch) -> None:
-    monkeypatch.setenv("CONTEST_GMAIL_ACCOUNT", "env@gmail.com")
+    monkeypatch.setenv("CONTEST_GMAIL_ACCOUNT", "2")
     email = compose_pick_email(2, "Coventry City", "Hull City")
-    assert "u/env%40gmail.com/" in email["gmail_url"]
+    assert "/mail/u/2/" in email["gmail_url"]
 
 
 def test_an_explicit_account_beats_the_environment(monkeypatch) -> None:
-    monkeypatch.setenv("CONTEST_GMAIL_ACCOUNT", "env@gmail.com")
-    email = compose_pick_email(2, "Coventry City", "Hull City", account="chosen@gmail.com")
-    assert "u/chosen%40gmail.com/" in email["gmail_url"]
+    monkeypatch.setenv("CONTEST_GMAIL_ACCOUNT", "2")
+    email = compose_pick_email(2, "Coventry City", "Hull City", account="3")
+    assert "/mail/u/3/" in email["gmail_url"]
 
 
 def test_pinning_does_not_disturb_the_message(monkeypatch) -> None:
     plain = compose_pick_email(2, "Coventry City", "Hull City")
-    pinned = compose_pick_email(2, "Coventry City", "Hull City", account="franco@gmail.com")
+    pinned = compose_pick_email(2, "Coventry City", "Hull City", account="1")
     assert plain["subject"] == pinned["subject"]
     assert plain["body"] == pinned["body"]
     assert plain["to"] == pinned["to"]

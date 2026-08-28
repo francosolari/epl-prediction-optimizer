@@ -24,19 +24,26 @@ def entrant_name() -> str:
 
 
 def gmail_compose_url(subject: str, body: str, recipient: str, account: str | None) -> str:
-    """Build a Gmail compose link, pinned to an account when one is known.
+    """Build a Gmail compose link, targeted at one account where possible.
 
-    Without an account Gmail composes from whichever session the browser has
-    as default, which is unpredictable when several are signed in. Putting the
-    address in the /mail/u/ path makes Gmail resolve that specific account
-    instead, so the message cannot go out from the wrong one.
+    Gmail selects the account from the numeric index in the /mail/u/<n>/ path.
+    An email address there is not honoured — it silently falls back to whatever
+    account is signed in first, which is how a pick can go out from the wrong
+    address with nothing on screen to show it. So a digit is used as the index,
+    and an address is passed as authuser, which Google resolves where it can.
+
+    The index is the only deterministic form. Open Gmail on the account you
+    want and read it out of the URL: mail.google.com/mail/u/1/ is index 1.
     """
-    query = urlencode(
-        {"view": "cm", "fs": "1", "to": recipient, "su": subject, "body": body},
-        quote_via=quote,
-    )
-    inbox = f"u/{quote(account)}/" if account else ""
-    return f"{GMAIL_BASE}/{inbox}?{query}"
+    params = {"view": "cm", "fs": "1", "to": recipient, "su": subject, "body": body}
+    index = ""
+    if account:
+        if account.isdigit():
+            index = f"u/{account}/"
+        else:
+            params["authuser"] = account
+    query = urlencode(params, quote_via=quote)
+    return f"{GMAIL_BASE}/{index}?{query}"
 
 
 def compose_pick_email(

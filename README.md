@@ -57,13 +57,17 @@ Committing a pick shows the submission email with **Send in Gmail** and a
 plain `mailto:` fallback.
 
 With more than one Google account signed in, Gmail composes from whichever it
-treats as default, which is not predictable. Set **Sends from** under the
-buttons to your contest address and the link targets that account directly
-(`mail.google.com/mail/u/<address>/…`). Until it is set the panel says so.
-Check the From line in the compose window before sending either way.
+treats as default. It selects an account from the **number** in the URL —
+`mail.google.com/mail/u/1/` is account 1 — and ignores an email address there,
+falling back to the default without saying so.
+
+So set **Gmail account** under the buttons to that digit: open Gmail on the
+account you want to send from and copy the number out of its address bar. The
+panel warns while it is unset or holds an address rather than a number. Confirm
+the From line the first time either way.
 
 `CONTEST_EMAIL`, `CONTEST_ENTRANT`, and `CONTEST_GMAIL_ACCOUNT` override the
-recipient, the name in the subject, and the sending account.
+recipient, the name in the subject, and the account index.
 
 ### Scorecard and the field
 

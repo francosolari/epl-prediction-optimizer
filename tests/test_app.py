@@ -350,11 +350,11 @@ def test_the_sending_google_account_can_be_set_and_pins_the_compose_link(tmp_pat
 
     client.post(
         "/actions/gmail-account",
-        data={"account": "franco@gmail.com", "week": "2"},
+        data={"account": "1", "week": "2"},
         follow_redirects=True,
     )
     after = client.get("/?week=2").text
-    assert "mail/u/franco%40gmail.com/" in after
+    assert "mail/u/1/" in after
     assert "Not set" not in after
 
 

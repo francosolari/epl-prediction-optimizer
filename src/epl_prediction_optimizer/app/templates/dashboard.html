@@ -87,14 +87,16 @@
             <form class="sender-form" method="post" action="/actions/gmail-account">
               <input type="hidden" name="week" value="{{ decision.selected_week }}">
               <label>
-                <span>Sends from</span>
-                <input type="email" name="account" value="{{ decision.submission.account }}" placeholder="your.name@gmail.com">
+                <span>Gmail account</span>
+                <input name="account" value="{{ decision.submission.account }}" placeholder="1" size="8" inputmode="numeric">
               </label>
               <button type="submit">Save</button>
-              {% if not decision.submission.account %}
-              <small class="sender-warning">Not set — Gmail will use whichever account your browser has signed in first. Set it to be sure.</small>
+              {% if decision.submission.account and decision.submission.account.isdigit() %}
+              <small>Compose opens Gmail account <strong>{{ decision.submission.account }}</strong>. Confirm the From line the first time.</small>
+              {% elif decision.submission.account %}
+              <small class="sender-warning">Gmail only honours a <strong>number</strong> here, not an address — it will fall back to your default account. Open Gmail on the account you want and copy the digit from its URL: <code>mail.google.com/mail/u/<strong>1</strong>/</code></small>
               {% else %}
-              <small>Compose opens in <strong>{{ decision.submission.account }}</strong>. Check the From line before sending.</small>
+              <small class="sender-warning">Not set — Gmail will use whichever account is signed in first. Open Gmail on the account you want and copy the digit from its URL: <code>mail.google.com/mail/u/<strong>1</strong>/</code></small>
               {% endif %}
             </form>
           </div>
