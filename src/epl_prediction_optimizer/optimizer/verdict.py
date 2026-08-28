@@ -18,8 +18,16 @@ EQUIVALENT = 95
 SLIGHT = 85
 
 
-def decision_verdict(scenarios: list[dict[str, Any]]) -> dict[str, Any] | None:
-    """Summarise the round's choice as an instruction plus an override bar."""
+def decision_verdict(
+    scenarios: list[dict[str, Any]],
+    committed: dict[str, Any] | None = None,
+) -> dict[str, Any] | None:
+    """Summarise the round's choice as an instruction plus an override bar.
+
+    Once ``committed`` names a pick the round is decided, so there is nothing
+    left to recommend. The verdict then reports only whether the committed
+    pick was the model's preference, and stays silent when it was.
+    """
     ranked = [
         item
         for item in scenarios
@@ -30,6 +38,9 @@ def decision_verdict(scenarios: list[dict[str, Any]]) -> dict[str, Any] | None:
     ranked = sorted(ranked, key=lambda item: -item["recommendation"])
     best = ranked[0]
     basis = best.get("score_basis", "season expected value")
+
+    if committed:
+        return _committed_verdict(ranked, committed)
 
     equivalent = [item for item in ranked if item["recommendation"] >= EQUIVALENT]
     names = [item["team"] for item in equivalent]
@@ -82,3 +93,41 @@ def _join(names: list[str]) -> str:
     if len(names) == 1:
         return names[0]
     return ", ".join(names[:-1]) + f" and {names[-1]}"
+
+
+def _committed_verdict(
+    ranked: list[dict[str, Any]],
+    committed: dict[str, Any],
+) -> dict[str, Any] | None:
+    """Report only a disagreement with what was actually submitted."""
+    team = committed.get("team")
+    best = ranked[0]
+    if best["team"] == team:
+        return None
+    chosen = next((item for item in ranked if item["team"] == team), None)
+    if chosen is None:
+        return None
+    gap = best["recommendation"] - chosen["recommendation"]
+    if gap <= 0:
+        return None
+    if chosen.get("tier") == "equivalent":
+        guidance = (
+            f"You picked {team} ({chosen['recommendation']}); the model marginally "
+            f"prefers {best['team']} ({best['recommendation']}). Inside its margin of "
+            "error — no reason to change."
+        )
+        band = "committed-equal"
+    else:
+        guidance = (
+            f"You picked {team} ({chosen['recommendation']}); the model prefers "
+            f"{best['team']} ({best['recommendation']}). Still changeable until kickoff."
+        )
+        band = "committed-differs"
+    return {
+        "team": team,
+        "band": band,
+        "headline": f"Committed: {team}",
+        "guidance": guidance,
+        "score": chosen["recommendation"],
+        "equivalent": [],
+    }

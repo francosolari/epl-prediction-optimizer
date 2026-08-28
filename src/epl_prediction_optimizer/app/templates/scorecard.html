@@ -69,6 +69,7 @@
                 <th scope="col">Week</th><th scope="col">Team</th><th scope="col">Venue</th>
                 <th scope="col">Opponent</th><th scope="col">Result</th>
                 <th scope="col">Model</th><th scope="col">Pts</th><th scope="col">Total</th>
+                <th scope="col"><span class="visually-hidden">Submit</span></th>
               </tr>
             </thead>
             <tbody>
@@ -82,9 +83,10 @@
                 <td>{{ "%.0f%%"|format(row.p_win * 100) if row.p_win else "—" }}</td>
                 <td><strong>{{ row.points if row.points is not none else "—" }}</strong></td>
                 <td>{{ row.running_total if row.points is not none else "—" }}</td>
+                <td>{% if row.email %}<a class="email-link" href="{{ row.email.gmail_url }}" target="_blank" rel="noopener" title="{{ row.email.body }}">Email</a>{% endif %}</td>
               </tr>
               {% else %}
-              <tr><td colspan="8" class="empty-copy">No committed picks for {{ season }} yet.</td></tr>
+              <tr><td colspan="9" class="empty-copy">No committed picks for {{ season }} yet.</td></tr>
               {% endfor %}
             </tbody>
           </table>

@@ -868,3 +868,41 @@ td a {
   opacity: 0.85;
 }
 
+.email-link { font-size: 0.8rem; text-decoration: underline; opacity: 0.8; }
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* Submission actions are links, so they need the button styling explicitly. */
+.submission-actions .primary-action,
+.submission-actions .secondary-action {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.45rem 0.85rem;
+  border-radius: 3px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  line-height: 1;
+  text-decoration: none;
+}
+.submission-actions .primary-action {
+  border: 1px solid #1a7f45;
+  background: #1a7f45;
+  color: #fff;
+}
+.submission-actions .primary-action:hover { background: #16693a; }
+.submission-actions .secondary-action {
+  border: 1px solid var(--desk-rule);
+  background: transparent;
+  color: inherit;
+  opacity: 0.85;
+}
+.submission-actions .secondary-action:hover { opacity: 1; }
+.verdict--committed-equal { border-left-color: #6b7280; }
+.verdict--committed-differs { border-left-color: #b07d00; }
+

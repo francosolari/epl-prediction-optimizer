@@ -207,7 +207,7 @@ def create_app(
             "selected_week": week,
             "next_open_week": next_open,
             "scenarios": scenarios,
-            "verdict": decision_verdict(scenarios),
+            "verdict": decision_verdict(scenarios, committed),
             "committed": committed,
             "submission": _submission_email(committed, scenarios),
             "entrant": entrant_name(),
@@ -919,6 +919,11 @@ def build_scorecard(
                 "points": points,
                 "running_total": running,
                 "state_class": _pick_state_class(points),
+                "email": compose_pick_email(
+                    int(pick["contest_week"]),
+                    pick["team"],
+                    result.get("opponent_for", {}).get(pick["team"]) or "opponent",
+                ),
             }
         )
 

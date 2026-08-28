@@ -69,18 +69,30 @@ def test_scenarios_score_every_feasible_option():
     assert all(item["tier"] in {"equivalent", "slightly behind", "behind"} for item in feasible)
 
 
-def test_scores_come_from_win_chance_when_a_field_is_supplied():
+def test_win_chance_is_reported_when_a_field_is_supplied():
     field = [3, 5, 7, 9, 11]
     scenarios = build_scenarios(_round_candidates(), 1, [], field_totals=field)
     feasible = [item for item in scenarios if item["feasible"]]
-    assert all(item["score_basis"] == "win chance" for item in feasible)
     assert all(item["win_chance"] is not None for item in feasible)
 
 
-def test_scores_fall_back_to_season_value_without_a_field():
-    scenarios = build_scenarios(_round_candidates(), 1, [])
+def test_scores_always_come_from_season_expected_value():
+    """Variance nudges win chance up as expected points fall; EV must lead."""
+    scenarios = build_scenarios(_round_candidates(), 1, [], field_totals=[3, 5, 7, 9, 11])
     feasible = [item for item in scenarios if item["feasible"]]
     assert all(item["score_basis"] == "season expected value" for item in feasible)
+    best = max(feasible, key=lambda item: item["recommendation"])
+    assert best["season_rank"] == 1
+
+
+def test_a_longshot_never_outranks_a_clearly_better_plan():
+    """The failure this guards: a 22% pick scoring above a 51% one on variance."""
+    scenarios = build_scenarios(_round_candidates(), 1, [], field_totals=[40, 45, 50])
+    feasible = [item for item in scenarios if item["feasible"]]
+    ordered = sorted(feasible, key=lambda item: -item["recommendation"])
+    assert [item["season_rank"] for item in ordered] == sorted(
+        item["season_rank"] for item in feasible
+    )
 
 
 def test_the_top_scored_option_is_the_top_season_ranked_option():
@@ -90,9 +102,7 @@ def test_the_top_scored_option_is_the_top_season_ranked_option():
     assert best_score["season_rank"] == 1
 
 
-def test_an_unreachable_field_falls_back_rather_than_scoring_everything_zero():
-    """If no plan can reach the field, win chance cannot rank the options."""
+def test_an_unreachable_field_still_scores_the_options():
     scenarios = build_scenarios(_round_candidates(), 1, [], field_totals=[400, 500])
     feasible = [item for item in scenarios if item["feasible"]]
-    assert all(item["score_basis"] == "season expected value" for item in feasible)
     assert max(item["recommendation"] for item in feasible) == 100

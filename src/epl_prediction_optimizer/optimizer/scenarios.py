@@ -157,35 +157,29 @@ def build_scenarios(
 def _score_recommendations(feasible: list[dict[str, Any]]) -> None:
     """Attach a 0-100 recommendation score and an equivalence tier.
 
-    The score is each choice's chance of winning as a share of the best
-    choice's, so 100 is the top line and 95 means "gives up five percent of
-    your title odds". Where no field has been imported it falls back to season
-    expected value, which ranks the same way but cannot express how much a gap
-    is worth.
+    The score is driven by season expected value, not by the chance of
+    winning. Those rank differently: a heavy underdog adds variance, and
+    variance nudges win probability up even as expected points fall, so
+    scoring on win chance alone recommends 22% shots over 51% ones. Backtests
+    put the value of that extra spread at between nothing and five percent
+    relative (see docs/model-evaluation.md), far less than the expected points
+    it costs. Expected value leads; win chance is reported alongside.
+
+    A quarter-point of season expected value costs about six points of score,
+    so options within roughly 0.2 points of the best land at 95 or above and
+    read as equivalent.
     """
     if not feasible:
         return
-    scored = [item for item in feasible if item.get("win_chance")]
-    if scored and max(item["win_chance"] for item in scored) > 0:
-        best = max(item["win_chance"] for item in scored)
-        for item in feasible:
-            chance = item.get("win_chance")
-            item["recommendation"] = round(100 * chance / best) if chance else None
-            item["score_basis"] = "win chance"
-    else:
-        best_ev = max(item["season_ev"] for item in feasible)
-        for item in feasible:
-            # Two season points is a decisive gap; scale the score across it.
-            item["recommendation"] = round(
-                100 * max(0.0, 1.0 - (best_ev - item["season_ev"]) / 2.0)
-            )
-            item["score_basis"] = "season expected value"
+    best_ev = max(item["season_ev"] for item in feasible)
+    for item in feasible:
+        cost = best_ev - item["season_ev"]
+        item["recommendation"] = max(0, round(100 - 25 * cost))
+        item["score_basis"] = "season expected value"
 
     for item in feasible:
-        score = item.get("recommendation")
-        if score is None:
-            item["tier"] = None
-        elif score >= 95:
+        score = item["recommendation"]
+        if score >= 95:
             item["tier"] = "equivalent"
         elif score >= 85:
             item["tier"] = "slightly behind"

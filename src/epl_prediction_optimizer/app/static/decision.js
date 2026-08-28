@@ -136,13 +136,17 @@
     if (!selected || commitButton.disabled) return;
     commitButton.disabled = true;
     commitButton.textContent = "Committing…";
+    const week = new URLSearchParams(location.search).get("week")
+      || document.querySelector("[data-week-picker]")?.value;
     try {
-      const response = await fetch(`/api/picks/${new URLSearchParams(location.search).get("week") || document.querySelector("[data-week-picker]")?.value}`, {
+      const response = await fetch(`/api/picks/${week}`, {
         method: "PUT", headers: {"Content-Type": "application/json"},
         body: JSON.stringify({match_id: selected.match_id, team: selected.team, venue: selected.venue})
       });
       if (!response.ok) throw new Error((await response.json()).detail || "Commit failed");
-      location.reload();
+      // Reloading the bare "/" would jump to the next open round, hiding the
+      // confirmation and submission email for the round just committed.
+      location.assign(`/?week=${week}`);
     } catch (error) {
       document.querySelector("[data-commit-summary]").textContent = error.message;
       commitButton.disabled = false;
