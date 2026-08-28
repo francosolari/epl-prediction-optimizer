@@ -904,7 +904,11 @@ def build_scorecard(
 ) -> dict[str, object]:
     """Assemble the scorecard: my scored rounds, the field, and where I sit in it."""
     picks = database.list_actual_picks(season)
-    results = _match_results(runtime_dir)
+    results = _match_results(runtime_dir, season)
+    # A committed pick whose match has not kicked off yet has no result, but its
+    # opponent is already known from the fixture list — and the submission email
+    # needs it.
+    fixtures = _fixture_opponents(runtime_dir)
     probabilities = _pick_probabilities(runtime_dir)
 
     my_picks: list[dict[str, object]] = []
@@ -913,13 +917,16 @@ def build_scorecard(
         points = pick.get("actual_points")
         if points is not None:
             running += int(points)
-        result = results.get(str(pick.get("match_id", "")), {})
+        result = _resolve_result(results, pick)
+        opponent = result.get("opponent_for", {}).get(pick["team"]) or _resolve_result(
+            fixtures, pick
+        ).get("opponent_for", {}).get(pick["team"])
         my_picks.append(
             {
                 "contest_week": int(pick["contest_week"]),
                 "team": pick["team"],
                 "venue": pick["venue"],
-                "opponent": result.get("opponent_for", {}).get(pick["team"]),
+                "opponent": opponent,
                 "result_label": result.get("label"),
                 "p_win": probabilities.get((int(pick["contest_week"]), pick["team"])),
                 "points": points,
@@ -928,7 +935,7 @@ def build_scorecard(
                 "email": compose_pick_email(
                     int(pick["contest_week"]),
                     pick["team"],
-                    result.get("opponent_for", {}).get(pick["team"]) or "opponent",
+                    opponent or "opponent",
                     account=_gmail_account(database) or None,
                 ),
             }
@@ -970,12 +977,21 @@ def _pick_state_class(points: object) -> str:
     return {3: "is-win", 1: "is-draw", 0: "is-loss"}.get(int(points), "")
 
 
-def _match_results(runtime_dir: Path) -> dict[str, dict]:
-    """Final scores by match id, with a readable label and each side's opponent."""
+def _match_results(runtime_dir: Path, season: str | None = None) -> dict[str, dict]:
+    """Final scores indexed by match id and by (round, team, venue).
+
+    Both keys are needed because a pick stores the fixture id of whichever
+    source listed it, and that is not always the id in the processed match
+    record — football-data.co.uk numbers a season differently from the official
+    API, and switches over mid-season once it publishes. Round, team, and venue
+    identify the same match under either scheme.
+    """
     path = runtime_dir / "data" / "processed" / "historical_matches.csv"
     if not path.exists():
         return {}
     frame = pd.read_csv(path).dropna(subset=["home_goals", "away_goals"])
+    if season and "season" in frame:
+        frame = frame[frame["season"].astype(str).str.zfill(4) == str(season).zfill(4)]
     results: dict[str, dict] = {}
     for match in frame.itertuples(index=False):
         home, away = int(match.home_goals), int(match.away_goals)
@@ -985,11 +1001,46 @@ def _match_results(runtime_dir: Path) -> dict[str, dict]:
             label = f"{match.home_team} {home}-{away}"
         else:
             label = f"{match.away_team} {away}-{home}"
-        results[str(match.match_id)] = {
+        entry = {
             "label": label,
             "opponent_for": {match.home_team: match.away_team, match.away_team: match.home_team},
         }
+        results[str(match.match_id)] = entry
+        if hasattr(match, "contest_week"):
+            week = int(match.contest_week)
+            results[f"slot:{week}:{match.home_team}:home"] = entry
+            results[f"slot:{week}:{match.away_team}:away"] = entry
     return results
+
+
+def _fixture_opponents(runtime_dir: Path) -> dict[str, dict]:
+    """Opponent lookup for scheduled fixtures, keyed like the results index."""
+    path = runtime_dir / "data" / "processed" / "fixtures.csv"
+    if not path.exists():
+        return {}
+    frame = pd.read_csv(path)
+    index: dict[str, dict] = {}
+    for fixture in frame.itertuples(index=False):
+        entry = {
+            "opponent_for": {
+                fixture.home_team: fixture.away_team,
+                fixture.away_team: fixture.home_team,
+            }
+        }
+        index[str(fixture.match_id)] = entry
+        week = int(fixture.contest_week)
+        index[f"slot:{week}:{fixture.home_team}:home"] = entry
+        index[f"slot:{week}:{fixture.away_team}:away"] = entry
+    return index
+
+
+def _resolve_result(results: dict[str, dict], pick: dict) -> dict:
+    """Find a pick's match by id, falling back to its round, team, and venue."""
+    by_id = results.get(str(pick.get("match_id", "")))
+    if by_id is not None:
+        return by_id
+    slot = f"slot:{int(pick['contest_week'])}:{pick['team']}:{pick['venue']}"
+    return results.get(slot, {})
 
 
 def _pick_probabilities(runtime_dir: Path) -> dict[tuple[int, str], float]:

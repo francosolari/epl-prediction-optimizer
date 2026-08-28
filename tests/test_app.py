@@ -356,3 +356,51 @@ def test_the_sending_google_account_can_be_set_and_pins_the_compose_link(tmp_pat
     after = client.get("/?week=2").text
     assert "mail/u/franco%40gmail.com/" in after
     assert "Not set" not in after
+
+
+def _scorecard_client(tmp_path: Path, match_id_in_history: str) -> TestClient:
+    processed = tmp_path / "data" / "processed"
+    processed.mkdir(parents=True)
+    (tmp_path / "data" / "exports").mkdir(parents=True)
+    (processed / "historical_matches.csv").write_text(
+        "match_id,season,contest_week,date,home_team,away_team,home_goals,away_goals\n"
+        f"{match_id_in_history},2627,1,2026-08-22,Hull City,Manchester United,2,0\n",
+        encoding="utf-8",
+    )
+    (processed / "fixtures.csv").write_text(
+        "match_id,contest_week,date,home_team,away_team\n"
+        "560561,2,2026-08-29,Coventry City,Hull City\n",
+        encoding="utf-8",
+    )
+    database = Database(tmp_path / "state.sqlite")
+    for week, match_id, team, venue, points in (
+        (1, "560543", "Manchester United", "away", 0),
+        (2, "560561", "Coventry City", "home", None),
+    ):
+        database.upsert_actual_pick(
+            {
+                "season": "2627",
+                "contest_week": week,
+                "match_id": match_id,
+                "team": team,
+                "venue": venue,
+                "actual_points": points,
+            }
+        )
+    return TestClient(create_app(database=database, workdir=tmp_path, use_live_data=False))
+
+
+def test_scorecard_resolves_results_when_the_history_renumbered_the_match(tmp_path: Path):
+    """football-data.co.uk renumbers a season once it publishes it mid-way."""
+    client = _scorecard_client(tmp_path, match_id_in_history="2627-0001")
+    page = client.get("/scorecard?season=2627").text
+    assert "Hull City 2-0" in page
+
+
+def test_scorecard_names_the_opponent_of_a_pick_not_yet_played(tmp_path: Path):
+    client = _scorecard_client(tmp_path, match_id_in_history="2627-0001")
+    page = client.get("/scorecard?season=2627").text
+    assert "I+pick+Coventry+City+to+beat+Hull+City" in page or (
+        "I%20pick%20Coventry%20City%20to%20beat%20Hull%20City" in page
+    )
+    assert "to+beat+opponent" not in page and "to%20beat%20opponent" not in page
