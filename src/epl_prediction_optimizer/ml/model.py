@@ -30,14 +30,33 @@ class ModelRun:
         self,
         fixtures: pd.DataFrame,
         season_stats: dict[str, list[int]] | None = None,
-        apply_dc: bool = True,
+        apply_dc: bool = False,
+        history: pd.DataFrame | None = None,
+        fixture_season: str | None = None,
     ) -> pd.DataFrame:
-        """Generate normalized HOME/DRAW/AWAY probabilities for fixtures."""
-        frame = build_fixture_features(fixtures, season_stats=season_stats).reset_index(drop=True)
+        """Generate normalized HOME/DRAW/AWAY probabilities for fixtures.
+
+        Pass ``history`` (completed matches) so fixture features come from the
+        same accumulator that produced the training rows. Without it the form,
+        streak, and head-to-head features fall back to neutral defaults and the
+        model is fed a distribution it never saw in training.
+
+        The optional draw correction is disabled by default because release
+        backtests have not shown an optimizer benefit from applying it.
+        """
+        frame = build_fixture_features(
+            fixtures,
+            history=history,
+            season_stats=season_stats,
+            fixture_season=fixture_season,
+        ).reset_index(drop=True)
         probabilities = self.estimator.predict_proba(frame[FEATURE_COLUMNS])
         classes = list(self.estimator.classes_)
         prob_frame = pd.DataFrame(probabilities, columns=classes)
-        output = frame[["match_id", "contest_week", "date", "home_team", "away_team"]].copy()
+        metadata = ["match_id", "contest_week", "date", "home_team", "away_team"]
+        if "kickoff_utc" in frame:
+            metadata.append("kickoff_utc")
+        output = frame[metadata].copy()
         output["p_home_win"] = prob_frame.get(OUTCOME_HOME, 0.0)
         output["p_draw"] = prob_frame.get(OUTCOME_DRAW, 0.0)
         output["p_away_win"] = prob_frame.get(OUTCOME_AWAY, 0.0)

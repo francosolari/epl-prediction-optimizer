@@ -1,5 +1,6 @@
 import pandas as pd
 
+from epl_prediction_optimizer.ml.analysis import expected_calibration_error
 from epl_prediction_optimizer.ml.features import build_training_frame
 from epl_prediction_optimizer.ml.model import train_model
 
@@ -71,8 +72,14 @@ def test_training_pipeline_outputs_normalized_probabilities():
         "p_draw",
         "p_away_win",
     ]
-    assert round(
-        predictions.loc[0, ["p_home_win", "p_draw", "p_away_win"]].sum(), 8
-    ) == 1.0
+    assert round(predictions.loc[0, ["p_home_win", "p_draw", "p_away_win"]].sum(), 8) == 1.0
     assert model_run.metrics["log_loss"] >= 0
 
+
+def test_expected_calibration_error_is_zero_for_correct_certain_predictions():
+    probabilities = pd.DataFrame(
+        {"HOME_WIN": [1.0, 0.0], "DRAW": [0.0, 1.0], "AWAY_WIN": [0.0, 0.0]}
+    )
+    actual = pd.Series(["HOME_WIN", "DRAW"])
+
+    assert expected_calibration_error(probabilities, actual) == 0.0

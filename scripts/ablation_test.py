@@ -22,10 +22,8 @@ from epl_prediction_optimizer.ml.model import season_decay_weights, train_model
 from epl_prediction_optimizer.optimizer.candidates import build_pick_candidates
 from epl_prediction_optimizer.optimizer.solver import optimize_picks
 from epl_prediction_optimizer.paths import PROCESSED_DIR
-from epl_prediction_optimizer.pipeline import WINNER_BENCHMARKS, _score_optimized_picks, _actual_outcome
-from sklearn.metrics import accuracy_score, log_loss
-
-import numpy as np
+from epl_prediction_optimizer.pipeline import WINNER_BENCHMARKS
+from epl_prediction_optimizer.scoring import actual_outcomes, probability_metrics, score_picks
 
 BASE_FEATURES = [
     "elo_diff", "home_elo", "away_elo",
@@ -56,7 +54,10 @@ FEATURE_GROUPS = {
     "+ all new features":     BASE_FEATURES + SHOTS_FEATURES + XG_FEATURES + ODDS_FEATURES,
 }
 
-TARGET_SEASONS = ["2324", "2425"]
+# Contest points over two seasons is 76 picks — far too noisy to select
+# features with. These seasons feed the probability metrics that decide;
+# points are printed only as context. See docs/model-evaluation.md.
+TARGET_SEASONS = ["2122", "2223", "2324", "2425", "2526"]
 
 
 def run_backtest(matches: pd.DataFrame, target_season: str, features: list[str]) -> dict:
@@ -86,46 +87,36 @@ def run_backtest(matches: pd.DataFrame, target_season: str, features: list[str])
 
     actual = target_raw[["match_id", "home_team", "away_team", "home_goals", "away_goals"]].copy()
     evaluated = predictions.merge(actual, on=["match_id", "home_team", "away_team"])
-    evaluated["actual"] = evaluated.apply(_actual_outcome, axis=1)
-
-    y_true = evaluated["actual"]
-    y_pred = evaluated[["p_home_win", "p_draw", "p_away_win"]].idxmax(axis=1).map(
-        {"p_home_win": "HOME_WIN", "p_draw": "DRAW", "p_away_win": "AWAY_WIN"}
-    )
+    evaluated["actual"] = actual_outcomes(evaluated)
 
     picks = optimize_picks(build_pick_candidates(predictions))
-    scored = _score_optimized_picks(picks, evaluated)
+    scored = score_picks(picks, evaluated)
 
-    return {
-        "accuracy": float(accuracy_score(y_true, y_pred)),
-        "log_loss": float(log_loss(
-            y_true, evaluated[["p_away_win", "p_draw", "p_home_win"]],
-            labels=["AWAY_WIN", "DRAW", "HOME_WIN"]
-        )),
-        "points": int(scored["actual_points"].sum()),
-        "xpts": float(scored["expected_points"].sum()),
-    }
+    metrics = probability_metrics(evaluated)
+    metrics["points"] = float(scored["actual_points"].sum())
+    return metrics
 
 
 def main() -> None:
     matches = pd.read_csv(PROCESSED_DIR / "historical_matches.csv")
 
-    # Header
-    print(f"\n{'Feature set':<28} ", end="")
-    for s in TARGET_SEASONS:
-        w = WINNER_BENCHMARKS.get(s)
-        print(f"  {s}(w={w}) ", end="")
-    print("  Total")
-    print("-" * 80)
+    header = f"{'Feature set':<28}{'LogLoss':>10}{'RPS':>9}{'Brier':>9}{'Acc':>7}{'Points':>8}"
+    print(f"\nHeld-out seasons: {', '.join(TARGET_SEASONS)}")
+    print(f"Winner benchmarks: {WINNER_BENCHMARKS}\n")
+    print(header)
+    print("-" * len(header))
 
     for label, features in FEATURE_GROUPS.items():
-        print(f"{label:<28} ", end="", flush=True)
-        total = 0
-        for season in TARGET_SEASONS:
-            r = run_backtest(matches, season, features)
-            total += r["points"]
-            print(f"  {r['points']:>3}pts {r['accuracy']:.3f} ", end="", flush=True)
-        print(f"  {total:>3}")
+        results = [run_backtest(matches, season, features) for season in TARGET_SEASONS]
+        mean = {
+            key: sum(r[key] for r in results) / len(results)
+            for key in ("log_loss", "rps", "brier", "accuracy")
+        }
+        total_points = int(sum(r["points"] for r in results))
+        print(
+            f"{label:<28}{mean['log_loss']:>10.4f}{mean['rps']:>9.4f}"
+            f"{mean['brier']:>9.4f}{mean['accuracy']:>7.3f}{total_points:>8}"
+        )
 
 
 if __name__ == "__main__":

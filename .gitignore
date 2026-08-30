@@ -13,4 +13,11 @@ wheels/
 .env
 
 # Runtime outputs
-data/
+/data/
+
+# Local Impeccable decision sessions
+.impeccable/questions/
+
+# macOS / IDE noise
+.DS_Store
+.idea/

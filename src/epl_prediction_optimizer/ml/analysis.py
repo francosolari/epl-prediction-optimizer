@@ -17,6 +17,34 @@ from epl_prediction_optimizer.ml.features import FEATURE_COLUMNS
 from epl_prediction_optimizer.ml.model import ModelRun
 
 
+def expected_calibration_error(
+    probabilities: pd.DataFrame,
+    actual: pd.Series,
+    *,
+    bins: int = 10,
+) -> float:
+    """Return top-label multiclass calibration error in equal-width bins."""
+    confidence = probabilities.max(axis=1)
+    predicted = probabilities.idxmax(axis=1)
+    correct = predicted.to_numpy() == actual.to_numpy()
+    total = len(probabilities)
+    if total == 0:
+        return 0.0
+    error = 0.0
+    for index in range(bins):
+        lower = index / bins
+        upper = (index + 1) / bins
+        mask = (confidence >= lower) & (
+            confidence <= upper if index == bins - 1 else confidence < upper
+        )
+        count = int(mask.sum())
+        if count:
+            error += (
+                count / total * abs(float(confidence[mask].mean()) - float(correct[mask].mean()))
+            )
+    return float(error)
+
+
 def feature_importance_report(
     model_run: ModelRun,
     training_frame: pd.DataFrame,
@@ -38,11 +66,13 @@ def feature_importance_report(
         n_jobs=-1,
     )
     return (
-        pd.DataFrame({
-            "feature": FEATURE_COLUMNS,
-            "importance": result.importances_mean,
-            "std": result.importances_std,
-        })
+        pd.DataFrame(
+            {
+                "feature": FEATURE_COLUMNS,
+                "importance": result.importances_mean,
+                "std": result.importances_std,
+            }
+        )
         .sort_values("importance", ascending=False)
         .reset_index(drop=True)
     )
@@ -61,17 +91,19 @@ def backtest_summary_report(
         data = json.loads(path.read_text(encoding="utf-8"))
         winner = data.get("winner_points")
         pts = data.get("optimized_points", 0)
-        rows.append({
-            "season": season,
-            "training_matches": data.get("training_matches"),
-            "accuracy": round(data.get("accuracy", 0), 4),
-            "log_loss": round(data.get("log_loss", 0), 4),
-            "picks": data.get("optimized_picks"),
-            "model_points": pts,
-            "expected_points": round(data.get("optimized_expected_points", 0), 1),
-            "winner_points": winner,
-            "gap_to_winner": (winner - pts) if winner else None,
-        })
+        rows.append(
+            {
+                "season": season,
+                "training_matches": data.get("training_matches"),
+                "accuracy": round(data.get("accuracy", 0), 4),
+                "log_loss": round(data.get("log_loss", 0), 4),
+                "picks": data.get("optimized_picks"),
+                "model_points": pts,
+                "expected_points": round(data.get("optimized_expected_points", 0), 1),
+                "winner_points": winner,
+                "gap_to_winner": (winner - pts) if winner else None,
+            }
+        )
     return pd.DataFrame(rows)
 
 
@@ -94,8 +126,11 @@ def pick_accuracy_report(picks: pd.DataFrame) -> dict[str, object]:
         "draw_rate": round(draws / total, 3),
         "loss_rate": round(losses / total, 3),
         "expected_vs_actual": round(
-            float(picks["actual_points"].sum() - picks["expected_points"].sum()), 2,
-        ) if "expected_points" in picks.columns else None,
+            float(picks["actual_points"].sum() - picks["expected_points"].sum()),
+            2,
+        )
+        if "expected_points" in picks.columns
+        else None,
     }
 
 
@@ -110,7 +145,10 @@ def print_feature_importance(df: pd.DataFrame) -> None:
 
 def print_backtest_summary(df: pd.DataFrame) -> None:
     """Print backtest comparison table to stdout."""
-    print(f"\n{'Season':<8} {'Acc':>6} {'LogLoss':>8} {'Picks':>6} {'Pts':>5} {'xPts':>7} {'Winner':>7} {'Gap':>5}")
+    print(
+        f"\n{'Season':<8} {'Acc':>6} {'LogLoss':>8} {'Picks':>6} "
+        f"{'Pts':>5} {'xPts':>7} {'Winner':>7} {'Gap':>5}"
+    )
     print("-" * 62)
     for _, row in df.iterrows():
         gap = f"{row['gap_to_winner']:+.0f}" if row["gap_to_winner"] is not None else " —"

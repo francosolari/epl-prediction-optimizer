@@ -1,10 +1,11 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="system">
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Model · EPL Prediction Optimizer</title>
-    <link rel="stylesheet" href="/static/styles.css">
+    <link rel="stylesheet" href="/static/styles.css?v={{ asset_version }}">
+    <script defer src="/static/decision.js?v={{ asset_version }}"></script>
     <style>
       .stage-diagram {
         display: grid;
@@ -22,8 +23,8 @@
         padding: var(--space-md);
         background: var(--bg);
       }
-      .stage-box h3 { margin: 0 0 var(--space-xs); font-size: 0.88rem; color: var(--pitch-deep); }
-      .stage-box p { font-size: 0.8rem; color: var(--muted); margin: 0; }
+      .stage-box h3 { margin: 0 0 var(--space-xs); font-size: 1rem; color: var(--pitch); }
+      .stage-box p { font-size: 0.78rem; color: var(--muted); margin: 0; }
       .stage-arrow {
         color: var(--muted);
         font-size: 1.5rem;
@@ -35,20 +36,22 @@
         border-radius: var(--radius);
         padding: var(--space-sm) var(--space-md);
         font-family: "SF Mono", "Fira Code", "Cascadia Code", monospace;
-        font-size: 0.82rem;
+        font-size: 0.78rem;
         overflow-x: auto;
       }
       .cmd-block code { color: color-mix(in oklch, var(--gold), white 20%); }
     </style>
   </head>
-  <body>
+  <body class="analysis-page">
     <header class="shell-header">
+      <a class="legacy-brand" href="/">P/O</a>
       <nav class="nav-rail" aria-label="Primary">
-        <a href="/">Dashboard</a>
-        <a href="/challenge?season=2526">My Picks</a>
-        <a href="/backtest">Backtest</a>
-        <a class="active" href="/model">Model</a>
-        <a href="/data">Data</a>
+        <a href="/"><span>01</span>Decision</a>
+        <a href="/challenge?season={{ season.code }}"><span>02</span>Season</a>
+        <a href="/scorecard?season={{ season.code }}"><span>03</span>Scorecard</a>
+        <a class="active" href="/model"><span>04</span>Model</a>
+        <a href="/data"><span>05</span>Data</a>
+        <a href="/backtest"><span>06</span>Backtest</a>
       </nav>
       <div class="title-block">
         <p class="eyebrow">Two-stage architecture</p>
@@ -62,6 +65,7 @@
           <span>no model</span>
           <strong>—</strong>
         {% endif %}
+        <button class="theme-toggle" type="button" data-theme-toggle aria-label="Change color theme">System</button>
       </div>
     </header>
 

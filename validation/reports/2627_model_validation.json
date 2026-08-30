@@ -1,0 +1,48 @@
+{
+  "schema_version": 1,
+  "generated_at_utc": "2026-08-21T22:28:36Z",
+  "status": "pass",
+  "evaluation_protocol": "Each target season is trained only on earlier completed seasons.",
+  "model_change": "Live inference now uses the same calibrated probabilities as release backtests; the unvalidated Dixon-Coles adjustment is opt-in.",
+  "feature_set_decision": "Retain the 26 validated Elo, form, table, draw-tendency, and head-to-head features. Shots, xG, and market variants did not improve the existing two-season optimized-points benchmark.",
+  "seasons": {
+    "2223": {
+      "training_matches": 10170,
+      "target_matches": 380,
+      "accuracy": 0.5605263158,
+      "multiclass_log_loss": 0.9835545994,
+      "expected_calibration_error": 0.0719190024,
+      "optimized_points": 58,
+      "optimized_expected_points": 59.692137,
+      "pick_point_mae": 1.1688941563
+    },
+    "2324": {
+      "training_matches": 10550,
+      "target_matches": 380,
+      "accuracy": 0.5578947368,
+      "multiclass_log_loss": 0.9645483336,
+      "expected_calibration_error": 0.0619969219,
+      "optimized_points": 73,
+      "optimized_expected_points": 67.822622,
+      "pick_point_mae": 1.17119
+    },
+    "2425": {
+      "training_matches": 10930,
+      "target_matches": 380,
+      "accuracy": 0.5026315789,
+      "multiclass_log_loss": 1.0106173754,
+      "expected_calibration_error": 0.0091970253,
+      "optimized_points": 68,
+      "optimized_expected_points": 63.322378,
+      "pick_point_mae": 1.1174952121
+    }
+  },
+  "aggregate": {
+    "matches": 1140,
+    "accuracy": 0.5403508772,
+    "multiclass_log_loss": 0.9862401028,
+    "expected_calibration_error": 0.0477043165,
+    "optimized_points": 199,
+    "optimized_expected_points": 190.837137
+  }
+}

@@ -1,19 +1,22 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="system">
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Challenge Manager · EPL Prediction Optimizer</title>
-    <link rel="stylesheet" href="/static/styles.css">
+    <link rel="stylesheet" href="/static/styles.css?v={{ asset_version }}">
+    <script defer src="/static/decision.js?v={{ asset_version }}"></script>
   </head>
-  <body>
+  <body class="analysis-page">
     <header class="shell-header">
+      <a class="legacy-brand" href="/">P/O</a>
       <nav class="nav-rail" aria-label="Primary">
-        <a href="/">Dashboard</a>
-        <a class="active" href="/challenge?season={{ season }}">My Picks</a>
-        <a href="/backtest">Backtest</a>
-        <a href="/model">Model</a>
-        <a href="/data">Data</a>
+        <a href="/"><span>01</span>Decision</a>
+        <a class="active" href="/challenge?season={{ season }}"><span>02</span>Season</a>
+        <a href="/scorecard?season={{ season }}"><span>03</span>Scorecard</a>
+        <a href="/model"><span>04</span>Model</a>
+        <a href="/data"><span>05</span>Data</a>
+        <a href="/backtest"><span>06</span>Backtest</a>
       </nav>
       <div class="title-block">
         <p class="eyebrow">Premier League selection desk</p>
@@ -22,6 +25,7 @@
       <div class="system-state">
         <span>{{ summary.submitted_picks }} submitted</span>
         <strong>{{ summary.points }} pts</strong>
+        <button class="theme-toggle" type="button" data-theme-toggle aria-label="Change color theme">System</button>
       </div>
     </header>
 
